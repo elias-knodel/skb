@@ -1,0 +1,71 @@
+# Compatibility notes for the hardening below.
+#
+# - The service runs as uid 0 with an empty capability set. /dev/input/event*
+#   (root:input 0660) and /dev/uinput (root:root 0660) are opened through the
+#   owner permission bits, so CAP_DAC_OVERRIDE is not needed. EVIOCGRAB and
+#   UI_DEV_CREATE perform no capability check.
+# - DeviceAllow=char-input covers major 13; uinput (c 10:223) is allowed by path.
+# - ProtectSystem=strict leaves /dev writable.
+# - Do NOT set PrivateDevices (hides /dev/input), PrivateUsers (the device owner
+#   would become nobody) or DynamicUser.
+# - The path-based AF_UNIX status socket works across PrivateNetwork.
+# - ioctl, ppoll, poll, pipe2 and inotify_* are part of @system-service.
+# - /etc/skb is the only writable path besides /run/skb: ConfigurationDirectory
+#   creates it and makes it writable under ProtectSystem=strict, so the daemon
+#   can replace the configuration atomically (temp file and rename).
+# - getsockopt (SO_PEERCRED) is part of @system-service.
+# - The status socket is mode 0666 only because every operation other than
+#   status is authorized against the peer credentials.
+# - ~@resources is not denied because the Go runtime calls prlimit64/setrlimit.
+
+[Unit]
+Description=skb input remapper for Corsair Darkstar
+After=systemd-udevd.service
+
+[Service]
+Type=exec
+ExecStart=/usr/local/bin/skb daemon --config /etc/skb/config.toml --socket /run/skb/status.sock
+Restart=on-failure
+RestartSec=2s
+RuntimeDirectory=skb
+RuntimeDirectoryMode=0755
+ConfigurationDirectory=skb
+ConfigurationDirectoryMode=0755
+UMask=0077
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+DevicePolicy=closed
+DeviceAllow=char-input rw
+DeviceAllow=/dev/uinput rw
+
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+PrivateIPC=yes
+RestrictAddressFamilies=AF_UNIX
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RemoveIPC=yes
+KeyringMode=private
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target
