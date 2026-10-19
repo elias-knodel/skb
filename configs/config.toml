@@ -1,0 +1,37 @@
+# skb configuration. Key names are evdev codes (see linux/input-event-codes.h).
+
+# Non-root uid allowed to modify the configuration through the TUI.
+# admin_uid = 1000
+
+# Devices to grab, matched by USB vendor and product ID.
+[[devices]]
+name = "Darkstar wired"
+vendor = 0x1b1c
+product = 0x1bb2
+
+[[devices]]
+name = "Darkstar Slipstream receiver"
+vendor = 0x1b1c
+product = 0x1bdc
+
+# In "to", every entry except the last is a modifier; the last is the main key.
+
+# Side button 1 sends 6.
+[[mappings]]
+from = "KEY_1"
+to = ["KEY_6"]
+
+# Side button 2 sends 7.
+[[mappings]]
+from = "KEY_2"
+to = ["KEY_7"]
+
+# Side button 3 sends F5.
+[[mappings]]
+from = "KEY_3"
+to = ["KEY_F5"]
+
+# Side button 4 sends Shift+Minus.
+[[mappings]]
+from = "KEY_4"
+to = ["KEY_LEFTSHIFT", "KEY_MINUS"]
