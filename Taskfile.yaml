@@ -1,0 +1,65 @@
+version: '3'
+
+# The first file to define a key wins, so the most specific comes first.
+dotenv:
+  - .env.local
+  - .env
+  - project.versions
+
+includes:
+  qa: ./devops/tasks/qa.yaml
+  go: ./devops/tasks/go.yaml
+  versions: ./devops/tasks/versions.yaml
+  host:
+    taskfile: ./devops/tasks/host.yaml
+    flatten: true
+
+vars:
+  COMPOSE: '{{.COMPOSE | default "docker compose"}}'
+  LINUX_UID:
+    sh: id -u
+  LINUX_GID:
+    sh: id -g
+  # Linux bind mounts carry the host's owner into the container; VirtioFS does not.
+  DEV_UID: '{{if eq OS "linux"}}{{.LINUX_UID}}{{else}}65532{{end}}'
+  DEV_GID: '{{if eq OS "linux"}}{{.LINUX_GID}}{{else}}65532{{end}}'
+  RUN: '{{.COMPOSE}} -f devops/compose.yaml run --rm --build'
+  EXEC: '{{.RUN}} -T go'
+  VERSION:
+    sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+  PREFIX: /usr/local
+  CONFIG_DIR: /etc/skb
+  UNIT_DIR: /etc/systemd/system
+
+env:
+  DEV_UID: '{{.DEV_UID}}'
+  DEV_GID: '{{.DEV_GID}}'
+
+tasks:
+  default:
+    desc: List every available task
+    silent: true
+    cmds:
+      - task --list
+
+  qa:
+    desc: Run every QA check
+    cmds:
+      - task: qa:default
+
+  build:
+    desc: Build static binary to ./bin/skb
+    cmds:
+      - '{{.EXEC}} env CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version={{.VERSION}}" -o bin/skb ./cmd/skb'
+    generates:
+      - bin/skb
+
+  clean:
+    desc: Remove build output
+    cmds:
+      - rm -rf bin
+
+  cache:destroy:
+    desc: Remove the Go cache volume
+    cmds:
+      - '{{.COMPOSE}} -f devops/compose.yaml down --volumes'

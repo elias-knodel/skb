@@ -1,0 +1,30 @@
+version: '3'
+
+tasks:
+  shell:
+    desc: Open a shell in the Go container
+    interactive: true
+    cmds:
+      - '{{.RUN}} go bash'
+
+  init:
+    desc: Initialise the Go module
+    cmds:
+      - '{{.EXEC}} go mod init github.com/elias-knodel/skb'
+    status:
+      - test -f go.mod
+
+  get:
+    desc: Add dependencies (task go:get -- module@version)
+    cmds:
+      - '{{.EXEC}} go get {{.CLI_ARGS}}'
+
+  tidy:
+    desc: Write go.mod and go.sum with go mod tidy
+    cmds:
+      - '{{.EXEC}} go mod tidy'
+
+  fmt:
+    desc: Format the sources
+    cmds:
+      - '{{.EXEC}} golangci-lint fmt ./...'

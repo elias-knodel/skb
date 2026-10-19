@@ -1,0 +1,29 @@
+name: skb
+
+services:
+    go:
+        build:
+            context: ..
+            dockerfile: Containerfile
+            target: dev
+            args:
+                GO_VERSION: ${GO_VERSION:?read from project.versions by task}
+                GOLANGCI_LINT_VERSION: ${GOLANGCI_LINT_VERSION:?read from project.versions by task}
+                GOTESTSUM_VERSION: ${GOTESTSUM_VERSION:?read from project.versions by task}
+                DEV_UID: ${DEV_UID:-65532}
+                DEV_GID: ${DEV_GID:-65532}
+        cap_drop:
+            - ALL
+        security_opt:
+            - no-new-privileges:true
+        tmpfs:
+            - /tmp:noexec
+        working_dir: /src
+        volumes:
+            # :z is a no-op under Docker without SELinux and relabels under Podman.
+            # The named volume inherits ownership from the image's /cache on first use.
+            - ..:/src:z
+            - go_cache:/cache
+
+volumes:
+    go_cache: {}

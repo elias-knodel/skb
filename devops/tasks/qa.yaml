@@ -1,0 +1,49 @@
+version: '3'
+
+vars:
+  GOTESTSUM: gotestsum
+
+tasks:
+  default:
+    desc: Run every QA check, cheapest first
+    cmds:
+      - task: build
+      - task: tidy
+      - task: lint
+      - task: test
+      - task: vuln
+
+  build:
+    desc: Compile every package
+    cmds:
+      - '{{.EXEC}} go build ./...'
+
+  lint:
+    desc: Lint with golangci-lint
+    # gofmt and govet run inside golangci-lint, so neither needs a task.
+    cmds:
+      - '{{.EXEC}} golangci-lint run ./...'
+
+  tidy:
+    desc: Fail when go.mod or go.sum differ from what go mod tidy would write
+    cmds:
+      - '{{.EXEC}} go mod tidy -diff'
+
+  test:
+    desc: Run tests with the race detector
+    cmds:
+      # CGO_ENABLED=1 because -race needs it, and the production build sets it to 0.
+      # Packages before CLI_ARGS, so an argument adds a flag rather than replacing ./...
+      # Without -count=1 the test cache answers for a whole suite.
+      - '{{.EXEC}} env CGO_ENABLED=1 {{.GOTESTSUM}} --format testname -- -race -count=1 ./... {{.CLI_ARGS}}'
+
+  test:pkg:
+    desc: Run tests of the packages given after --
+    cmds:
+      - '{{.EXEC}} env CGO_ENABLED=1 {{.GOTESTSUM}} --format testname -- -race -count=1 {{.CLI_ARGS | default "./..."}}'
+
+  vuln:
+    desc: Scan for known vulnerabilities
+    cmds:
+      # Pinned through go run, so the scan needs nothing in the image.
+      - '{{.EXEC}} go run golang.org/x/vuln/cmd/govulncheck@{{.GOVULNCHECK_VERSION}} ./...'

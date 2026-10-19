@@ -1,0 +1,69 @@
+version: "2"
+
+# The standard set: errcheck, govet, ineffassign, staticcheck, unused.
+linters:
+  default: standard
+  enable:
+    - asasalint
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - containedctx
+    - durationcheck
+    - errorlint
+    - exhaustive
+    - fatcontext
+    - forbidigo
+    - gochecknoinits
+    - goconst
+    - gocritic
+    - gosec
+    - makezero
+    - misspell
+    - modernize
+    - musttag
+    - nakedret
+    - nilerr
+    - nilnesserr
+    - nilnil
+    - noctx
+    - nolintlint
+    - nosprintfhostport
+    - perfsprint
+    - recvcheck
+    - revive
+    - sloglint
+    - tagliatelle
+    - testpackage
+    - tparallel
+    - unconvert
+    - unparam
+    - usestdlibvars
+    - usetesting
+  settings:
+    errcheck:
+      check-type-assertions: true
+    exhaustive:
+      default-signifies-exhaustive: true
+    tagliatelle:
+      case:
+        rules:
+          json: snake
+          toml: snake
+  exclusions:
+    rules:
+      # A test may repeat a string inline, and its tags are not the API's.
+      - path: _test\.go$
+        linters:
+          - goconst
+          - tagliatelle
+
+# The default caps hide findings past 50 per linter and 3 per message.
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+# Enabling a formatter also makes `golangci-lint run` report unformatted files.
+formatters:
+  enable:
+    - gofmt

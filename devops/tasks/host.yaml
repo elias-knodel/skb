@@ -1,0 +1,30 @@
+version: '3'
+
+# Host-only tasks. No Go runs here: the built static binary installs itself.
+
+tasks:
+  install:
+    desc: Install binary, unit and config via the built binary (uses sudo)
+    preconditions:
+      - sh: test -x bin/skb
+        msg: run task build first
+    cmds:
+      - sudo ./bin/skb install --admin-uid {{.LINUX_UID}} {{.CLI_ARGS}}
+
+  uninstall:
+    desc: Remove binary and systemd unit, keeping the config
+    preconditions:
+      - sh: test -x bin/skb
+        msg: run task build first
+    cmds:
+      - sudo ./bin/skb uninstall
+
+  status:
+    desc: Show the service status
+    cmds:
+      - systemctl status skb.service --no-pager
+
+  logs:
+    desc: Follow the service log
+    cmds:
+      - journalctl -u skb.service -f
