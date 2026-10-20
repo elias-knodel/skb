@@ -1,49 +1,51 @@
 # skb
 
-Daemon und TUI für die Corsair Darkstar. Der Daemon greift (EVIOCGRAB) die Tastatur-Interfaces der Maus ab, belegt die Seitentasten neu und leitet alle übrigen Ereignisse an ein virtuelles uinput-Gerät weiter. Hotplug und der Wechsel zwischen Kabel und Funk werden per inotify erkannt. Mappings werden in der TUI angelernt, bearbeitet und gelöscht; der Daemon übernimmt Änderungen ohne Neustart.
+Daemon and TUI for the Corsair Darkstar. The daemon grabs (EVIOCGRAB) the mouse's keyboard interfaces, remaps the side buttons and forwards all other events to a virtual uinput device. Hotplug and switching between wired and wireless are detected via inotify. Mappings are learned, edited and deleted in the TUI; the daemon applies changes without a restart.
 
-Unterstützte Geräte (USB-ID):
+Supported devices (USB ID):
 
-- Darkstar kabelgebunden: `1b1c:1bb2`
-- Darkstar über Slipstream-Empfänger: `1b1c:1bdc`
+- Darkstar wired: `1b1c:1bb2`
+- Darkstar via Slipstream receiver: `1b1c:1bdc`
 
-Andere Corsair-Geräte (z. B. die K100, `1b1c:1b7c`) bleiben unberührt.
+Other Corsair devices (e.g. the K100, `1b1c:1b7c`) are left untouched.
 
-Der Eintrag `1b1c:1bdc` deckt den gesamten Slipstream-Empfänger ab. Weitere an denselben Dongle gekoppelte Corsair-Geräte würden ebenfalls abgegriffen (reine Durchleitung, kein Funktionsverlust); bei Bedarf in der Konfiguration einschränken.
+The `1b1c:1bdc` entry covers the entire Slipstream receiver. Other Corsair devices paired with the same dongle would be grabbed as well (pure passthrough, no loss of functionality); restrict this in the configuration if needed.
 
-## Voraussetzungen
+See [ROADMAP.md](ROADMAP.md) for planned work.
+
+## Requirements
 
 - [Task](https://taskfile.dev)
 - Docker Compose
-- für die Installation aus der TUI: polkit (`pkexec`) mit einem Authentifizierungs-Agent (Plasma bringt einen mit)
+- for installing from the TUI: polkit (`pkexec`) with an authentication agent (Plasma ships one)
 
-Go läuft ausschließlich im Container; auf dem Host wird kein Go benötigt.
+Go runs exclusively in a container; Go is not required on the host.
 
-## Befehle
+## Commands
 
 ```sh
-task qa          # Build, tidy, lint, Tests (-race), govulncheck
-task build       # statisches Binary nach ./bin/skb
-task install     # sudo ./bin/skb install --admin-uid <uid>: Binary, Unit und Config installieren
-task uninstall   # Binary und Unit entfernen, /etc/skb bleibt erhalten
+task qa          # build, tidy, lint, tests (-race), govulncheck
+task build       # static binary at ./bin/skb
+task install     # sudo ./bin/skb install --admin-uid <uid>: install binary, unit and config
+task uninstall   # remove binary and unit, /etc/skb is kept
 ```
 
-## Workflow in der TUI
+## TUI workflow
 
-`./bin/skb tui` (oder nach der Installation `skb tui`):
+`./bin/skb tui` (or `skb tui` after installation):
 
-1. **Setup** (`s`): zeigt, ob Unit installiert und Dienst aktiv sind. `i` installiert und startet den Dienst über `pkexec`, `x` deaktiviert zusätzlich input-remapper, `u` deinstalliert. Ist der Daemon nicht erreichbar und die Unit nicht installiert, startet die TUI direkt im Setup.
-2. **Hinzufügen** (`a`): Schritt 1/3 die Seitentaste an der Maus drücken, Schritt 2/3 die Zieltaste oder Kombination auf der Tastatur drücken, Schritt 3/3 mit `enter` speichern (`t` lernt das Ziel neu, `esc` verwirft).
-3. **Bearbeiten** (`e`): überspringt Schritt 1 und lernt das Ziel des gewählten Mappings neu.
-4. **Löschen** (`d`, dann `y`).
+1. **Setup** (`s`): shows whether the unit is installed and the service is active. `i` installs and starts the service via `pkexec`, `x` additionally disables input-remapper, `u` uninstalls. If the daemon is unreachable and the unit is not installed, the TUI starts directly in setup.
+2. **Add** (`a`): step 1/3 press the side button on the mouse, step 2/3 press the target key or combination on the keyboard, step 3/3 save with `enter` (`t` re-learns the target, `esc` discards).
+3. **Edit** (`e`): skips step 1 and re-learns the target of the selected mapping.
+4. **Delete** (`d`, then `y`).
 
-`esc` bricht jede Lernphase ab und kann deshalb nicht als Zieltaste gelernt werden. Beim Lernen des Ziels werden alle Tastaturen gelesen, die nicht abgegriffen sind, ohne sie zu greifen; eine Tastatur, die ein anderes Programm (z. B. input-remapper) abgreift, kann nicht angelernt werden. Die Zeitgrenze pro Lernschritt beträgt 10 s, die Anzeige der Restzeit aktualisiert sich mit dem Status-Poll.
+`esc` cancels every learning phase and therefore cannot be learned as a target key. While learning the target, all keyboards that are not grabbed are read without grabbing them; a keyboard grabbed by another program (e.g. input-remapper) cannot be learned. The timeout per learning step is 10 s; the remaining-time display refreshes with the status poll.
 
-**Hinweis zur Installation aus der TUI:** Das Setup startet `pkexec` auf dem Pfad des Binaries, aus dem die TUI gestartet wurde, und kopiert genau dieses Binary nach `/usr/local/bin/skb`. Für maximale Sicherheit die Erstinstallation daher mit `task install` (sudo) durchführen und die TUI danach als `/usr/local/bin/skb tui` starten.
+**Note on installing from the TUI:** Setup runs `pkexec` on the path of the binary the TUI was started from and copies exactly that binary to `/usr/local/bin/skb`. For maximum security, perform the initial installation with `task install` (sudo) and then start the TUI as `/usr/local/bin/skb tui`.
 
-## Konfiguration und Berechtigungen
+## Configuration and permissions
 
-`/etc/skb/config.toml` wird vom Daemon verwaltet und beim Speichern atomar neu geschrieben; handgeschriebene Kommentare gehen dabei verloren. `task install` überschreibt eine vorhandene Datei nicht, ergänzt aber `admin_uid`, falls dort keiner steht. Fehlt die Datei, startet der Daemon mit eingebauten Defaults und legt sie beim ersten Speichern an. Vorlage: `configs/config.toml`.
+`/etc/skb/config.toml` is managed by the daemon and rewritten atomically on save; hand-written comments are lost in the process. `task install` does not overwrite an existing file, but adds `admin_uid` if none is set. If the file is missing, the daemon starts with built-in defaults and creates it on the first save. Template: `configs/config.toml`.
 
 ```toml
 admin_uid = 1000
@@ -63,29 +65,29 @@ from = "KEY_4"
 to = ["KEY_LEFTSHIFT", "KEY_MINUS"]
 ```
 
-In `to` sind alle Einträge außer dem letzten Modifier, der letzte ist die Haupttaste (nur Tastatur-Keycodes, keine `BTN_*`). Die Ausgabe sind evdev-Keycodes und damit layoutunabhängig: `KEY_MINUS` ist die Taste rechts neben der 0, auf dem deutschen Layout also ß; Shift+ß ergibt dort "?".
+In `to`, all entries except the last are modifiers; the last one is the main key (keyboard keycodes only, no `BTN_*`). The output consists of evdev keycodes and is therefore layout-independent: `KEY_MINUS` is the key to the right of 0, which is ß on the German layout; Shift+ß produces "?" there.
 
-Ändernde und lernende Operationen erlaubt der Daemon nur Prozessen mit `uid == admin_uid` oder root (geprüft per `SO_PEERCRED` bei jeder Anfrage). Der Status-Socket `/run/skb/status.sock` hat Modus 0666, damit jeder lokale Benutzer den Status lesen kann; das ist nur wegen dieser Prüfung vertretbar. Ist die TUI-uid nicht `admin_uid`, werden die Aktionen gesperrt und auf das Setup verwiesen.
+The daemon only permits modifying and learning operations for processes with `uid == admin_uid` or root (checked via `SO_PEERCRED` on every request). The status socket `/run/skb/status.sock` has mode 0666 so that every local user can read the status; this is only acceptable because of that check. If the TUI's uid is not `admin_uid`, actions are locked and the user is referred to setup.
 
-Prüfen: `skb check-config --config configs/config.toml`
+Validate: `skb check-config --config configs/config.toml`
 
-## Greifregel
+## Grab rule
 
-Jedes tastaturfähige Interface (mit mindestens einer Tastatur-Taste) der konfigurierten IDs wird abgegriffen, unabhängig von den Mappings; ohne Mappings werden die Ereignisse unverändert durchgereicht. Reine Zeiger-Interfaces (nur `BTN_*`) bleiben unberührt. Die virtuellen Geräte kündigen alle Tastatur-Keycodes im Voraus an, damit neue Mappings ohne Neuanlage des Geräts wirken.
+Every keyboard-capable interface (with at least one keyboard key) of the configured IDs is grabbed, regardless of the mappings; without mappings, events are passed through unchanged. Pure pointer interfaces (only `BTN_*`) are left untouched. The virtual devices announce all keyboard keycodes in advance so that new mappings take effect without recreating the device.
 
 ## input-remapper
 
-input-remapper muss für die Darkstar deaktiviert sein, sonst schlägt das Abgreifen mit EBUSY fehl (sichtbar in der TUI und im Journal). Im Setup `x` wählen, in input-remapper-gtk die Injektion stoppen und Autoload für beide Corsair-Einträge abschalten, oder `sudo systemctl disable --now input-remapper`.
+input-remapper must be disabled for the Darkstar, otherwise grabbing fails with EBUSY (visible in the TUI and the journal). Choose `x` in setup, stop the injection in input-remapper-gtk and disable autoload for both Corsair entries, or run `sudo systemctl disable --now input-remapper`.
 
 ## Status
 
-- `skb tui` zeigt Geräte (kabelgebunden/Funk, Status, Fehler) und Mappings.
-- `journalctl -u skb` bzw. `task logs`. Gedrückte Tasten werden nie geloggt.
+- `skb tui` shows devices (wired/wireless, status, errors) and mappings.
+- `journalctl -u skb` or `task logs`. Pressed keys are never logged.
 
-## Einschränkungen
+## Limitations
 
-- Pro abgegriffenem Interface entsteht ein eigenes virtuelles Gerät.
-- LED- und Repeat-Ereignisse (EV_LED, EV_REP) werden nicht weitergeleitet.
-- Das virtuelle Gerät kann keine ABS-Bereiche setzen; der angebotene `ABS_VOLUME`-Code erhält den Bereich 0..0.
-- Eine beim Lernstart bereits gehaltene Seitentaste wird nicht erfasst; erneut drücken.
-- Die TUI einer neuen Version gegen einen alten Daemon meldet "daemon outdated" und verweist auf das Setup.
+- Each grabbed interface gets its own virtual device.
+- LED and repeat events (EV_LED, EV_REP) are not forwarded.
+- The virtual device cannot set ABS ranges; the offered `ABS_VOLUME` code gets the range 0..0.
+- A side button already held down when learning starts is not captured; press it again.
+- A TUI of a newer version running against an older daemon reports "daemon outdated" and refers to setup.
