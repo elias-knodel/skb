@@ -3,11 +3,28 @@ package tui
 import "github.com/elias-knodel/skb/internal/ipc"
 
 type (
-	statusMsg    ipc.Status
-	statusErrMsg struct{ err error }
-	tickMsg      struct{}
-	probeMsg     struct{ state SetupState }
-	execDoneMsg  struct{ err error }
+	// statusMsg carries a status fetch; poll marks results of the poll chain
+	// and seq orders fetches.
+	statusMsg struct {
+		st   ipc.Status
+		poll bool
+		seq  int
+	}
+
+	statusErrMsg struct {
+		err  error
+		poll bool
+		seq  int
+	}
+
+	tickMsg  struct{}
+	probeMsg struct{ state SetupState }
+
+	// execDoneMsg reports a finished privileged command with its captured stderr.
+	execDoneMsg struct {
+		err    error
+		stderr string
+	}
 
 	sourceMsg struct {
 		session int
@@ -40,4 +57,10 @@ type (
 		session int
 		target  bool
 	}
+	// spinTickMsg advances the spinner frame of one learn session.
+	spinTickMsg struct{ session int }
+	// confirmArmMsg ends the input guard of the confirm view.
+	confirmArmMsg struct{ session int }
+	// flashExpireMsg clears the flash message with the given sequence number.
+	flashExpireMsg struct{ seq int }
 )

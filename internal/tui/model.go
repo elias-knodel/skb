@@ -8,9 +8,16 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"slices"
+	"strings"
 	"time"
+	"unicode"
 
+	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/elias-knodel/skb/internal/ipc"
 )
@@ -24,6 +31,20 @@ const (
 	fetchTimeout = 2 * time.Second
 	probeTimeout = 3 * time.Second
 	learnTimeout = 10 * time.Second
+
+	// inputGuard ignores keys right after the confirm view appears, so keys
+	// still in flight from the learn step cannot trigger an action.
+	inputGuard    = 400 * time.Millisecond
+	flashDuration = 3 * time.Second
+	// spinFPS is the frame interval of spinner.MiniDot.
+	spinFPS = time.Second / 12
+
+	defaultWidth = 80
+	maxWidth     = 100
+	// wideWidth is the content width from which the key label column is shown.
+	wideWidth = 80
+	// stderrLines is the number of installer stderr lines shown on failure.
+	stderrLines = 10
 )
 
 // Client is the daemon API used by the UI.
@@ -62,6 +83,8 @@ type Config struct {
 	Interval time.Duration
 	// Tick schedules a message after d; tea.Tick when nil.
 	Tick func(d time.Duration, f func(time.Time) tea.Msg) tea.Cmd
+	// Now returns the current time for the uptime display; time.Now when nil.
+	Now func() time.Time
 }
 
 type viewID int
@@ -81,11 +104,16 @@ type Model struct {
 	cfg  Config
 	view viewID
 
+	width, height int
+
 	status    ipc.Status
 	statusErr error
 	loaded    bool
 	cursor    int
 	hint      string
+
+	// fetchSeq numbers status fetches; results older than appliedSeq are dropped.
+	fetchSeq, appliedSeq int
 
 	setup     SetupState
 	probed    bool
@@ -96,12 +124,28 @@ type Model struct {
 	cancel    context.CancelFunc
 	remaining int
 	busyTries int
+	spinFrame int
+
+	// armed ends the input guard of the confirm view; pending marks a save or delete in flight.
+	armed   bool
+	pending bool
+
+	flash    string
+	flashSeq int
 
 	from    string
 	to      []string
 	oldFrom string
 
+	// label is the character typed for the learned target; labelSet marks the
+	// first key of the target session as consumed.
+	label    string
+	labelSet bool
+
 	errText string
+
+	help help.Model
+	bar  progress.Model
 }
 
 // New returns a model for cfg.
@@ -110,32 +154,74 @@ func New(cfg Config) Model {
 		cfg.Tick = tea.Tick
 	}
 
-	return Model{cfg: cfg}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
+
+	m := Model{
+		cfg:  cfg,
+		help: newHelp(),
+		bar:  progress.New(progress.WithGradient(gradientFrom, gradientTo), progress.WithoutPercentage()),
+	}
+
+	return m.layout()
 }
 
-// Init triggers the first status fetch.
+// contentWidth is the width of the rendered content.
+func (m Model) contentWidth() int {
+	w := m.width
+	if w <= 0 {
+		w = defaultWidth
+	}
+
+	return min(w, maxWidth)
+}
+
+// layout derives widget sizes from the window size.
+func (m Model) layout() Model {
+	m.help.Width = m.width
+	m.bar.Width = max(min(m.contentWidth()-10, 40), 10)
+
+	return m
+}
+
+// Init triggers the first status fetch and starts the poll chain.
 func (m Model) Init() tea.Cmd {
-	return m.fetchCmd()
+	_, cmd := m.fetch(true)
+
+	return cmd
 }
 
-func (m Model) fetchCmd() tea.Cmd {
-	client := m.cfg.Client
+// fetch starts a status fetch. Only poll fetches continue the poll chain.
+func (m Model) fetch(poll bool) (Model, tea.Cmd) {
+	m.fetchSeq++
 
-	return func() tea.Msg {
+	client, seq := m.cfg.Client, m.fetchSeq
+
+	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 		defer cancel()
 
 		st, err := client.Status(ctx)
 		if err != nil {
-			return statusErrMsg{err: err}
+			return statusErrMsg{err: err, poll: poll, seq: seq}
 		}
 
-		return statusMsg(st)
+		return statusMsg{st: st, poll: poll, seq: seq}
 	}
 }
 
 func (m Model) tickCmd() tea.Cmd {
 	return m.cfg.Tick(m.cfg.Interval, func(time.Time) tea.Msg { return tickMsg{} })
+}
+
+// pollCmd reschedules the poll chain for results that belong to it.
+func (m Model) pollCmd(poll bool) tea.Cmd {
+	if !poll {
+		return nil
+	}
+
+	return m.tickCmd()
 }
 
 func (m Model) probeCmd() tea.Cmd {
@@ -152,43 +238,61 @@ func (m Model) probeCmd() tea.Cmd {
 // Update handles messages and key presses.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+
+		return m.layout(), nil
 	case statusMsg:
-		m.status, m.statusErr, m.loaded = ipc.Status(msg), nil, true
+		if msg.seq < m.appliedSeq {
+			return m, m.pollCmd(msg.poll)
+		}
+
+		m.appliedSeq = msg.seq
+		m.status, m.statusErr, m.loaded = msg.st, nil, true
 		m.cursor = min(m.cursor, max(len(m.status.Mappings)-1, 0))
 
-		return m, m.tickCmd()
+		return m, m.pollCmd(msg.poll)
 	case statusErrMsg:
+		if msg.seq < m.appliedSeq {
+			return m, m.pollCmd(msg.poll)
+		}
+
+		m.appliedSeq = msg.seq
 		m.statusErr, m.loaded = msg.err, true
 
 		if !m.probed {
-			return m, tea.Batch(m.tickCmd(), m.probeCmd())
+			return m, tea.Batch(m.pollCmd(msg.poll), m.probeCmd())
 		}
 
-		return m, m.tickCmd()
+		return m, m.pollCmd(msg.poll)
 	case tickMsg:
-		return m, m.fetchCmd()
+		return m.fetch(true)
 	case probeMsg:
 		return m.onProbe(msg), nil
 	case execDoneMsg:
-		if msg.err != nil {
-			m.errText, m.view = "command failed: "+msg.err.Error(), viewError
-
-			return m, nil
-		}
-
-		return m, tea.Batch(m.probeCmd(), m.fetchCmd())
+		return m.onExecDone(msg)
 	case learnTickMsg:
 		return m.onLearnTick(msg)
 	case learnRetryMsg:
 		return m.onLearnRetry(msg)
+	case spinTickMsg:
+		return m.onSpinTick(msg)
+	case confirmArmMsg:
+		return m.onConfirmArm(msg), nil
+	case flashExpireMsg:
+		if msg.seq == m.flashSeq {
+			m.flash = ""
+		}
+
+		return m, nil
 	case sourceMsg:
 		return m.onSource(msg)
 	case targetMsg:
 		return m.onTarget(msg)
 	case savedMsg:
-		return m.onMutated(msg.mappings, msg.err)
+		return m.onMutated(msg.mappings, msg.err, "Mapping saved")
 	case deletedMsg:
-		return m.onMutated(msg.mappings, msg.err)
+		return m.onMutated(msg.mappings, msg.err, "Mapping deleted")
 	case tea.KeyMsg:
 		return m.onKey(msg)
 	}
@@ -207,17 +311,82 @@ func (m Model) onProbe(msg probeMsg) Model {
 	return m
 }
 
-// onMutated finishes a save or delete.
-func (m Model) onMutated(mappings []ipc.Mapping, err error) (tea.Model, tea.Cmd) {
+func (m Model) onExecDone(msg execDoneMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.errText = "command failed: " + msg.err.Error()
+
+		if tail := stderrTail(msg.stderr); tail != "" {
+			m.errText += "\n\n" + tail
+		}
+
+		m.view = viewError
+
+		return m, nil
+	}
+
+	m, fetch := m.fetch(false)
+
+	return m, tea.Batch(m.probeCmd(), fetch)
+}
+
+// stderrTail returns the last lines of captured command output.
+func stderrTail(s string) string {
+	s = sanitize(s)
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	if len(lines) > stderrLines {
+		lines = lines[len(lines)-stderrLines:]
+	}
+
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+// sanitize strips terminal escape sequences and non-printable runes except
+// newline and tab.
+func sanitize(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' || unicode.IsPrint(r) {
+			return r
+		}
+
+		return -1
+	}, ansi.Strip(s))
+}
+
+// setFlash shows text until the returned timer fires.
+func (m Model) setFlash(text string) (Model, tea.Cmd) {
+	m.flashSeq++
+	m.flash = text
+
+	seq := m.flashSeq
+
+	return m, m.cfg.Tick(flashDuration, func(time.Time) tea.Msg { return flashExpireMsg{seq: seq} })
+}
+
+// onMutated finishes a save or delete; verb is the flash text on success.
+func (m Model) onMutated(mappings []ipc.Mapping, err error, verb string) (tea.Model, tea.Cmd) {
+	m.pending = false
+
 	if err != nil {
 		return m.fail(err), nil
 	}
 
 	m.status.Mappings = mappings
-	m.cursor = min(m.cursor, max(len(mappings)-1, 0))
+
+	// Poll results requested before this mutation are stale.
+	m.appliedSeq = m.fetchSeq + 1
+
+	if i := slices.IndexFunc(mappings, func(mp ipc.Mapping) bool { return mp.From == m.from }); i >= 0 && m.view == viewConfirm {
+		m.cursor = i
+	} else {
+		m.cursor = min(m.cursor, max(len(mappings)-1, 0))
+	}
+
 	m.view = viewStatus
 
-	return m, m.fetchCmd()
+	m, flash := m.setFlash(verb)
+	m, fetch := m.fetch(false)
+
+	return m, tea.Batch(flash, fetch)
 }
 
 // fail shows err; cancellations just return to the status view.
@@ -274,9 +443,9 @@ func outdated(err error) bool {
 func (m Model) View() string {
 	switch m.view {
 	case viewLearnSource:
-		return m.viewLearn("Step 1/3: press the side button on the mouse")
+		return m.viewLearn(1, "Press the side button on the mouse")
 	case viewLearnTarget:
-		return m.viewLearn("Step 2/3: press the key or combination on the keyboard")
+		return m.viewLearn(2, "Press the key or combination on the keyboard")
 	case viewConfirm:
 		return m.confirmView()
 	case viewDeleteConfirm:
@@ -284,9 +453,90 @@ func (m Model) View() string {
 	case viewSetup:
 		return m.setupView()
 	case viewError:
-		return titleStyle.Render("skb") + "\n\n" + errStyle.Render(m.errText) + "\n\n" +
-			dimStyle.Render("press any key") + "\n"
+		return m.errorView()
 	default:
 		return m.statusView()
 	}
+}
+
+func (m Model) errorView() string {
+	box := errBoxStyle.Width(m.contentWidth() - 2).
+		Render(errStyle.Render("Error") + "\n\n" + m.errText)
+
+	return m.screen(box, "")
+}
+
+// bodyAvail is the number of body lines left next to header, footer and the
+// extra block; screen and the status body share it so they cannot diverge.
+func (m Model) bodyAvail(extra string) int {
+	avail := m.height - lipgloss.Height(m.headerView()) - lipgloss.Height(m.footerView()) - 2
+	if extra != "" {
+		avail -= lipgloss.Height(extra) + 1
+	}
+
+	return avail
+}
+
+// screen assembles header, body, optional extra lines and footer. With a
+// known height the frame never exceeds it: the extra block is dropped first,
+// then body and footer, so the header always remains.
+func (m Model) screen(body, extra string) string {
+	header, footer := m.headerView(), m.footerView()
+
+	if m.height > 0 {
+		if m.bodyAvail(extra) < 1 {
+			extra = ""
+		}
+
+		avail := m.bodyAvail(extra)
+		if avail < 1 {
+			out := header
+			if lipgloss.Height(header)+lipgloss.Height(footer) <= m.height {
+				out += "\n" + footer
+			}
+
+			lines := strings.Split(out, "\n")
+
+			return strings.Join(lines[:min(m.height, len(lines))], "\n")
+		}
+
+		body = fitHeight(body, avail)
+	}
+
+	out := header + "\n\n" + body
+	if extra != "" {
+		out += "\n\n" + extra
+	}
+
+	return out + "\n\n" + footer
+}
+
+// fitHeight cuts s to at most n lines, marking the cut with an ellipsis.
+func fitHeight(s string, n int) string {
+	n = max(n, 1)
+
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return s
+	}
+
+	return strings.Join(append(lines[:n-1], dimStyle.Render("…")), "\n")
+}
+
+// footerView renders the key help of the current view.
+func (m Model) footerView() string {
+	h := m.help
+
+	if m.view != viewStatus && m.view != viewSetup {
+		h.ShowAll = false
+	}
+
+	switch {
+	case m.view == viewConfirm && !m.armed:
+		return dimStyle.Render("waiting for keys to settle…")
+	case m.view == viewConfirm && m.pending, m.view == viewDeleteConfirm && m.pending:
+		return ""
+	}
+
+	return h.View(m.keyMap())
 }

@@ -26,8 +26,9 @@ func TestAddFlow(t *testing.T) {
 	r.wantView("Step 2/3")
 
 	r.settle(cmd)
-	r.wantView("Step 3/3", "KEY_1 -> KEY_LEFTSHIFT+KEY_MINUS")
-
+	r.wantView("Step 3/3")
+	r.wantLine("KEY_1", "→", "KEY_LEFTSHIFT+KEY_MINUS")
+	r.arm()
 	r.settle(r.key("enter"))
 
 	if r.client.lastSet.From != "KEY_1" || r.client.lastSet.OldFrom != "" ||
@@ -47,7 +48,9 @@ func TestEditSkipsSourceStep(t *testing.T) {
 	cmd := r.key("e")
 	r.wantView("Step 2/3")
 	r.settle(cmd)
-	r.wantView("Step 3/3", "KEY_4 -> KEY_LEFTSHIFT+KEY_MINUS")
+	r.wantView("Step 3/3")
+	r.wantLine("KEY_4", "→", "KEY_LEFTSHIFT+KEY_MINUS")
+	r.arm()
 	r.settle(r.key("enter"))
 
 	if r.client.sourceCalls != 0 || r.client.lastSet.From != "KEY_4" || r.client.lastSet.OldFrom != "KEY_4" {
@@ -62,9 +65,11 @@ func TestConfirmRelearnAndDiscard(t *testing.T) {
 	r.loaded()
 	r.settle(r.key("a"))
 	r.wantView("Step 3/3")
+	r.arm()
 
 	r.settle(r.key("t"))
 	r.wantView("Step 3/3")
+	r.arm()
 
 	r.key("esc")
 	r.wantView("Devices")
@@ -151,6 +156,7 @@ func TestOtherErrorShown(t *testing.T) {
 	r.client.setErr = errors.New("disk exploded")
 	r.loaded()
 	r.settle(r.key("a"))
+	r.arm()
 	r.settle(r.key("enter"))
 	r.wantView("disk exploded")
 }
@@ -186,9 +192,9 @@ func TestCountdownTicks(t *testing.T) {
 	r := newRig(t, adminStatus())
 	r.loaded()
 	r.key("a")
-	r.wantView("10 s left")
+	r.wantView("10 s")
 
-	for _, want := range []string{"9 s left", "8 s left"} {
+	for _, want := range []string{"9 s", "8 s"} {
 		if cmd := r.update(r.fire(time.Second)); cmd == nil {
 			t.Fatal("countdown not rescheduled")
 		}
@@ -222,13 +228,13 @@ func TestStaleAndStoppedTicksAreDropped(t *testing.T) {
 		t.Error("tick of an old session rescheduled")
 	}
 
-	r.wantView("10 s left")
+	r.wantView("10 s")
 
 	if cmd := r.update(current); cmd == nil {
 		t.Error("current tick dropped")
 	}
 
-	r.wantView("9 s left")
+	r.wantView("9 s")
 }
 
 func TestBusyIsRetried(t *testing.T) {

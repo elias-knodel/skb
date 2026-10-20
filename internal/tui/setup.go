@@ -5,42 +5,37 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
-func yesNo(v bool) string {
-	if v {
-		return okStyle.Render("yes")
+// check renders a checklist line; bad selects the style of a failed check.
+func check(ok bool, okText, badText string, bad lipgloss.Style) string {
+	if ok {
+		return okStyle.Render("✔ " + okText)
 	}
 
-	return warnStyle.Render("no")
+	return bad.Render("✘ " + badText)
 }
 
 func (m Model) setupView() string {
-	var b strings.Builder
-
-	b.WriteString(titleStyle.Render("Setup") + "\n\n")
+	lines := []string{titleStyle.Render("Setup"), ""}
 
 	if !m.probed {
-		b.WriteString(dimStyle.Render("checking...") + "\n")
+		lines = append(lines, dimStyle.Render("checking…"))
 	} else {
-		unit := warnStyle.Render("not installed")
-		if m.setup.UnitInstalled {
-			unit = okStyle.Render("installed")
-		}
-
-		b.WriteString("  service unit:         " + unit + "\n")
-		b.WriteString("  service active:       " + yesNo(m.setup.ServiceActive) + "\n")
-		b.WriteString("  daemon reachable:     " + yesNo(m.setup.SocketOK) + "\n")
-		b.WriteString("  input-remapper active: " + yesNo(m.setup.InputRemapperActive) + "\n")
+		lines = append(lines,
+			check(m.setup.UnitInstalled, "service unit installed", "service unit not installed", errStyle),
+			check(m.setup.ServiceActive, "service active", "service not active", errStyle),
+			check(m.setup.SocketOK, "daemon reachable", "daemon not reachable", errStyle),
+			check(!m.setup.InputRemapperActive, "input-remapper inactive", "input-remapper active", warnStyle),
+		)
 
 		if m.setup.Err != "" {
-			b.WriteString("\n" + errStyle.Render(m.setup.Err) + "\n")
+			lines = append(lines, "", errStyle.Render(m.setup.Err))
 		}
 	}
 
-	b.WriteString("\n" + dimStyle.Render("i install & start  x install + disable input-remapper  u uninstall  esc back") + "\n")
-
-	return b.String()
+	return m.screen(cardStyle.Width(m.contentWidth()-2).Render(strings.Join(lines, "\n")), "")
 }
 
 func (m Model) setupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -51,6 +46,8 @@ func (m Model) setupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case keyEsc:
 		m.view = viewStatus
+	case "?":
+		m.help.ShowAll = !m.help.ShowAll
 	case "r":
 		return m, m.probeCmd()
 	case "i":
@@ -64,9 +61,35 @@ func (m Model) setupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// stderrLimit bounds the captured installer output.
+const stderrLimit = 8 << 10
+
+// tailBuffer keeps only the last limit bytes written to it.
+type tailBuffer struct {
+	limit int
+	buf   []byte
+}
+
+func (b *tailBuffer) Write(p []byte) (int, error) {
+	b.buf = append(b.buf, p...)
+	if over := len(b.buf) - b.limit; over > 0 {
+		b.buf = append(b.buf[:0], b.buf[over:]...)
+	}
+
+	return len(p), nil
+}
+
+func (b *tailBuffer) String() string { return string(b.buf) }
+
 // runPrivileged releases the terminal for the polkit prompt and runs skb with elevated rights.
 func (m Model) runPrivileged(args ...string) (tea.Model, tea.Cmd) {
 	cmd := m.cfg.Command(args...)
 
-	return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return execDoneMsg{err: err} })
+	// stdin and stdout stay on the terminal for the polkit prompt.
+	stderr := &tailBuffer{limit: stderrLimit}
+	cmd.Stderr = stderr
+
+	return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return execDoneMsg{err: err, stderr: stderr.String()}
+	})
 }

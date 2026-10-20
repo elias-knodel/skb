@@ -13,6 +13,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/elias-knodel/skb/internal/config"
 	"github.com/elias-knodel/skb/internal/daemon"
@@ -159,7 +160,10 @@ func runTUI(ctx context.Context, args []string, _, stderr io.Writer, _ string) e
 		Interval: *interval,
 	})
 
-	if _, err := tea.NewProgram(model, tea.WithContext(ctx)).Run(); err != nil {
+	// Query the terminal background once, before bubbletea owns stdin.
+	_ = lipgloss.HasDarkBackground()
+
+	if _, err := tea.NewProgram(model, tea.WithContext(ctx), tea.WithAltScreen()).Run(); err != nil {
 		return fmt.Errorf("run tui: %w", err)
 	}
 

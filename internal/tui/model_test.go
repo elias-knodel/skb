@@ -3,6 +3,7 @@ package tui_test
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"slices"
 	"strings"
@@ -11,6 +12,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/elias-knodel/skb/internal/ipc"
 	"github.com/elias-knodel/skb/internal/tui"
@@ -18,6 +21,8 @@ import (
 
 type fakeClient struct {
 	mu sync.Mutex
+
+	mappings []ipc.Mapping
 
 	status    ipc.Status
 	statusErr error
@@ -45,7 +50,12 @@ func (c *fakeClient) Status(context.Context) (ipc.Status, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	return c.status, c.statusErr
+	st := c.status
+	if c.mappings != nil {
+		st.Mappings = c.mappings
+	}
+
+	return st, c.statusErr
 }
 
 func (c *fakeClient) LearnSource(ctx context.Context, d time.Duration) (string, error) {
@@ -87,7 +97,21 @@ func (c *fakeClient) SetMapping(_ context.Context, a ipc.SetMappingArgs) ([]ipc.
 	c.setCalls++
 	c.lastSet = a
 
-	return []ipc.Mapping{{From: a.From, To: a.To}}, c.setErr
+	if c.setErr != nil {
+		return nil, c.setErr
+	}
+
+	if c.mappings == nil {
+		c.mappings = c.status.Mappings
+	}
+
+	merged := slices.DeleteFunc(slices.Clone(c.mappings), func(mp ipc.Mapping) bool {
+		return mp.From == a.OldFrom || mp.From == a.From
+	})
+	merged = append(merged, ipc.Mapping{From: a.From, To: a.To, Label: a.Label})
+	c.mappings = merged
+
+	return merged, nil
 }
 
 func (c *fakeClient) DeleteMapping(_ context.Context, from string) ([]ipc.Mapping, error) {
@@ -97,19 +121,34 @@ func (c *fakeClient) DeleteMapping(_ context.Context, from string) ([]ipc.Mappin
 	c.delCalls++
 	c.lastDel = from
 
-	return nil, c.deleteErr
+	if c.deleteErr != nil {
+		return nil, c.deleteErr
+	}
+
+	if c.mappings == nil {
+		c.mappings = c.status.Mappings
+	}
+
+	c.mappings = slices.DeleteFunc(slices.Clone(c.mappings), func(mp ipc.Mapping) bool { return mp.From == from })
+
+	return c.mappings, nil
 }
 
 type fakeProber struct{ state tui.SetupState }
 
 func (p fakeProber) Probe(context.Context) tui.SetupState { return p.state }
 
-type commandRecorder struct{ calls [][]string }
+type commandRecorder struct {
+	calls [][]string
+	last  *exec.Cmd
+}
 
 func (r *commandRecorder) factory(args ...string) *exec.Cmd {
 	r.calls = append(r.calls, args)
 
-	return exec.CommandContext(context.Background(), "/bin/true")
+	r.last = exec.CommandContext(context.Background(), "/bin/true")
+
+	return r.last
 }
 
 func adminStatus() ipc.Status {
@@ -177,6 +216,7 @@ func newRig(t *testing.T, st ipc.Status) *rig {
 		Interval: time.Hour,
 		Tick:     r.tick,
 	})
+	r.update(tea.WindowSizeMsg{Width: 100, Height: 50})
 
 	return r
 }
@@ -267,6 +307,13 @@ func (r *rig) wantView(subs ...string) {
 	}
 }
 
+func TestMain(m *testing.M) {
+	lipgloss.SetColorProfile(termenv.Ascii)
+	lipgloss.SetHasDarkBackground(true)
+
+	os.Exit(m.Run())
+}
+
 func TestInitFetchesStatus(t *testing.T) {
 	t.Parallel()
 
@@ -278,7 +325,7 @@ func TestInitFetchesStatus(t *testing.T) {
 	}
 
 	r.update(msgs[0])
-	r.wantView("KEY_4 -> KEY_LEFTSHIFT+KEY_MINUS")
+	r.wantLine("KEY_4", "→", "KEY_LEFTSHIFT+KEY_MINUS")
 }
 
 func TestStatusViewListsDevices(t *testing.T) {
@@ -397,4 +444,57 @@ func runAsync(cmd tea.Cmd) <-chan tea.Msg {
 	}()
 
 	return out
+}
+
+// arm ends the input guard of the confirm view.
+func (r *rig) arm() { r.update(r.fire(tui.InputGuard)) }
+
+// wantLine asserts that one line of the view contains all substrings in order.
+func (r *rig) wantLine(subs ...string) {
+	r.t.Helper()
+
+	for line := range strings.SplitSeq(r.view(), "\n") {
+		pos, ok := 0, true
+
+		for _, s := range subs {
+			i := strings.Index(line[pos:], s)
+			if i < 0 {
+				ok = false
+
+				break
+			}
+
+			pos += i + len(s)
+		}
+
+		if ok {
+			return
+		}
+	}
+
+	r.t.Errorf("no line contains %q in order:\n%s", subs, r.view())
+}
+
+func (r *rig) wantNoView(subs ...string) {
+	r.t.Helper()
+
+	v := r.view()
+	for _, s := range subs {
+		if strings.Contains(v, s) {
+			r.t.Errorf("view contains %q:\n%s", s, v)
+		}
+	}
+}
+
+// countTicks counts pending timers of duration d.
+func (r *rig) countTicks(d time.Duration) int {
+	n := 0
+
+	for _, rec := range r.ticks {
+		if rec.d == d {
+			n++
+		}
+	}
+
+	return n
 }
