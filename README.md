@@ -5,6 +5,23 @@
 
 skb (simple key binds) is a daemon and TUI for the Corsair Darkstar. The daemon grabs (EVIOCGRAB) the mouse's keyboard interfaces, remaps the side buttons and forwards all other events to a virtual uinput device. Hotplug and switching between wired and wireless are detected via inotify. Mappings are learned, edited and deleted in the TUI; the daemon applies changes without a restart.
 
+## Features
+
+| Feature | Description |
+| --- | --- |
+| Side button remapping | Map Darkstar side buttons to any keyboard key or key combination |
+| Interactive learning | Learn source button and target key directly in the TUI, no keycode lookup needed |
+| Typed labels | Mappings show the character actually typed on the active layout (e.g. `ß`) |
+| Live reload | The daemon applies mapping changes without a restart |
+| Hotplug | Wired and wireless (Slipstream) connections are detected automatically via inotify |
+| Passthrough | All non-mapped events are forwarded unchanged to a virtual uinput device |
+| Full-screen TUI | Alt-screen interface with device cards, mapping table, progress bar and help |
+| Guided setup | Install, start and uninstall the service from the TUI via `pkexec`, optionally disabling input-remapper |
+| Access control | Changes are restricted to `admin_uid` or root, checked via `SO_PEERCRED` |
+| Privacy | Pressed keys are never logged |
+
+## Supported devices
+
 Supported devices (USB ID):
 
 - Darkstar wired: `1b1c:1bb2`
@@ -68,7 +85,16 @@ from = "KEY_4"
 to = ["KEY_LEFTSHIFT", "KEY_MINUS"]
 ```
 
-In `to`, all entries except the last are modifiers; the last one is the main key (keyboard keycodes only, no `BTN_*`). The output consists of evdev keycodes and is therefore layout-independent: `KEY_MINUS` is the key to the right of 0, which is ß on the German layout; Shift+ß produces "?" there.
+In `to`, all entries except the last are modifiers; the last one is the main key (keyboard keycodes only, no `BTN_*`). The output consists of evdev keycodes and is therefore layout-independent: `KEY_MINUS` is the physical position to the right of 0 on a US layout, which is ß on the German layout; Shift+ß produces "?" there.
+
+The optional `label` field (at most 16 printable characters) is display-only and never affects remapping. The TUI sets it automatically while learning a target: it stores the character the active layout produced for the pressed key (for example `ß` or `?`) and shows it instead of the evdev name. Without a label, the TUI falls back to names derived from the evdev codes.
+
+```toml
+[[mappings]]
+from = "KEY_4"
+to = ["KEY_LEFTSHIFT", "KEY_MINUS"]
+label = "?"
+```
 
 The daemon only permits modifying and learning operations for processes with `uid == admin_uid` or root (checked via `SO_PEERCRED` on every request). The status socket `/run/skb/status.sock` has mode 0666 so that every local user can read the status; this is only acceptable because of that check. If the TUI's uid is not `admin_uid`, actions are locked and the user is referred to setup.
 
