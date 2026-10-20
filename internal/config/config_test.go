@@ -437,3 +437,44 @@ func TestFromRejectsPointerButtons(t *testing.T) {
 		t.Errorf("BTN_SIDE rejected: %v", err)
 	}
 }
+
+func TestLabel(t *testing.T) {
+	t.Parallel()
+
+	withLabel := func(label string) string {
+		return validDevices + "\n[[mappings]]\nfrom = \"KEY_1\"\nto = [\"KEY_LEFTSHIFT\", \"KEY_MINUS\"]\nlabel = " + label + "\n"
+	}
+
+	parseErr(t, withLabel(`"\u001b[31mx"`), "label")
+	parseErr(t, withLabel(`"line\nbreak"`), "label")
+	parseErr(t, withLabel(`"12345678901234567"`), "label")
+
+	cfg, err := config.Parse([]byte(withLabel(`"ß?"`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Mappings[0].Label != "ß?" {
+		t.Fatalf("label = %q", cfg.Mappings[0].Label)
+	}
+
+	data, err := config.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	again, err := config.Parse(data)
+	if err != nil || again.Mappings[0].Label != "ß?" {
+		t.Fatalf("round trip: %v %+v", err, again)
+	}
+
+	plain, err := config.Parse([]byte(validDevices + validMapping))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, _ := config.Marshal(plain)
+	if strings.Contains(string(out), "label") {
+		t.Error("empty label written")
+	}
+}

@@ -15,6 +15,7 @@ vendor = 0x1b1c
 product = 0x1bdc
 
 # In "to", every entry except the last is a modifier; the last is the main key.
+# The optional "label" is display-only text for the TUI (set automatically while learning).
 
 # Side button 1 sends 6.
 [[mappings]]

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/BurntSushi/toml"
 	"github.com/holoplot/go-evdev"
@@ -44,8 +46,9 @@ type rawDevice struct {
 }
 
 type rawMapping struct {
-	From string   `toml:"from"`
-	To   []string `toml:"to"`
+	From  string   `toml:"from"`
+	To    []string `toml:"to"`
+	Label string   `toml:"label,omitempty"`
 }
 
 // DeviceMatcher selects a device by USB vendor and product ID.
@@ -60,6 +63,8 @@ type Mapping struct {
 	From      evdev.EvCode
 	Modifiers []evdev.EvCode
 	Key       evdev.EvCode
+	// Label is the display-only text of the target as typed on the active layout.
+	Label string
 }
 
 // Outputs returns the modifiers followed by the main key.
@@ -162,7 +167,29 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// MaxLabelRunes is the maximum length of a mapping label.
+const MaxLabelRunes = 16
+
+// ValidateLabel checks a display label: at most MaxLabelRunes printable runes.
+func ValidateLabel(s string) error {
+	if utf8.RuneCountInString(s) > MaxLabelRunes {
+		return fmt.Errorf("label: longer than %d characters", MaxLabelRunes)
+	}
+
+	for _, r := range s {
+		if !unicode.IsPrint(r) {
+			return errors.New("label: contains non-printable characters")
+		}
+	}
+
+	return nil
+}
+
 func validateMapping(m Mapping) error {
+	if err := ValidateLabel(m.Label); err != nil {
+		return err
+	}
+
 	if m.From == 0 {
 		return errors.New("from must be set")
 	}
@@ -362,7 +389,7 @@ func convertMapping(m rawMapping) (Mapping, error) {
 		codes = append(codes, code)
 	}
 
-	out := Mapping{From: from}
+	out := Mapping{From: from, Label: m.Label}
 	if len(codes) == 0 {
 		return out, nil
 	}
@@ -391,7 +418,7 @@ func Marshal(c *Config) ([]byte, error) {
 	}
 
 	for _, m := range c.Mappings {
-		rm := rawMapping{From: keys.Name(m.From)}
+		rm := rawMapping{From: keys.Name(m.From), Label: m.Label}
 		for _, code := range m.Outputs() {
 			rm.To = append(rm.To, keys.Name(code))
 		}

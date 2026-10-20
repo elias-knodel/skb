@@ -380,3 +380,21 @@ func TestStatusAdminUID(t *testing.T) {
 		t.Errorf("status = %+v", st)
 	}
 }
+
+func TestSetMappingLabel(t *testing.T) {
+	t.Parallel()
+
+	h, _, _ := grabbedKeyboard(t, &saver{})
+
+	list, err := h.d.SetMapping(context.Background(), ipc.SetMappingArgs{
+		From: "KEY_1", To: []string{"KEY_LEFTSHIFT", "KEY_MINUS"}, Label: "?",
+	})
+	if err != nil || len(list) != 1 || list[0].Label != "?" {
+		t.Fatalf("set: %+v %v", list, err)
+	}
+
+	for _, label := range []string{"\x1b[31m", "a\nb", "12345678901234567"} {
+		_, err := h.d.SetMapping(context.Background(), ipc.SetMappingArgs{From: "KEY_2", To: []string{"KEY_A"}, Label: label})
+		wantErrCode(t, err, ipc.CodeInvalid)
+	}
+}

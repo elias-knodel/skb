@@ -252,14 +252,14 @@ func TestProtocolErrors(t *testing.T) {
 	path := serve(t, &fakeHandler{admin: new(ownUID())})
 
 	cases := map[string]struct{ line, code string }{
-		"version":       {`{"v":2,"op":"status"}` + "\n", ipc.CodeUnsupportedVersion},
-		"unknown op":    {`{"v":1,"op":"x"}` + "\n", ipc.CodeUnknownOp},
-		"unknown field": {`{"v":1,"op":"status","extra":1}` + "\n", ipc.CodeBadRequest},
+		"version":       {`{"v":1,"op":"status"}` + "\n", ipc.CodeUnsupportedVersion},
+		"unknown op":    {`{"v":2,"op":"x"}` + "\n", ipc.CodeUnknownOp},
+		"unknown field": {`{"v":2,"op":"status","extra":1}` + "\n", ipc.CodeBadRequest},
 		"malformed":     {"not json\n", ipc.CodeBadRequest},
-		"args field":    {`{"v":1,"op":"learn_source","args":{"bogus":1}}` + "\n", ipc.CodeBadRequest},
-		"oversized":     {`{"v":1,"op":"status","pad":"` + strings.Repeat("a", 20*1024) + `"}` + "\n", ipc.CodeBadRequest},
-		"timeout low":   {`{"v":1,"op":"learn_source","args":{"timeout_ms":500}}` + "\n", ipc.CodeBadRequest},
-		"timeout high":  {`{"v":1,"op":"learn_source","args":{"timeout_ms":40000}}` + "\n", ipc.CodeBadRequest},
+		"args field":    {`{"v":2,"op":"learn_source","args":{"bogus":1}}` + "\n", ipc.CodeBadRequest},
+		"oversized":     {`{"v":2,"op":"status","pad":"` + strings.Repeat("a", 20*1024) + `"}` + "\n", ipc.CodeBadRequest},
+		"timeout low":   {`{"v":2,"op":"learn_source","args":{"timeout_ms":500}}` + "\n", ipc.CodeBadRequest},
+		"timeout high":  {`{"v":2,"op":"learn_source","args":{"timeout_ms":40000}}` + "\n", ipc.CodeBadRequest},
 	}
 
 	for name, tc := range cases {
