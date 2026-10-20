@@ -1,6 +1,9 @@
 # skb
 
-Daemon and TUI for the Corsair Darkstar. The daemon grabs (EVIOCGRAB) the mouse's keyboard interfaces, remaps the side buttons and forwards all other events to a virtual uinput device. Hotplug and switching between wired and wireless are detected via inotify. Mappings are learned, edited and deleted in the TUI; the daemon applies changes without a restart.
+> [!NOTE]
+> Most of the code in this repository was written by AI. Code quality is assured through test-driven development and human review.
+
+skb (simple key binds) is a daemon and TUI for the Corsair Darkstar. The daemon grabs (EVIOCGRAB) the mouse's keyboard interfaces, remaps the side buttons and forwards all other events to a virtual uinput device. Hotplug and switching between wired and wireless are detected via inotify. Mappings are learned, edited and deleted in the TUI; the daemon applies changes without a restart.
 
 Supported devices (USB ID):
 
