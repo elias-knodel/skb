@@ -12,7 +12,7 @@
 
 ## TUI
 
-- [ ] Start the TUI by default when `skb` is run without a subcommand, instead of requiring `skb tui`
+- [x] Start the TUI by default when `skb` is run without a subcommand, instead of requiring `skb tui`
 
 ## Updates
 

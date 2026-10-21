@@ -64,7 +64,7 @@ sudo ./skb-linux-amd64 install --admin-uid "$(id -u)"
 
 ## TUI workflow
 
-`./bin/skb tui` (or `skb tui` after installation):
+`./bin/skb` (or `skb` after installation; TUI flags such as `--interval 1s` can be passed directly):
 
 1. **Setup** (`s`): shows whether the unit is installed and the service is active. `i` installs and starts the service via `pkexec`, `x` additionally disables input-remapper, `u` uninstalls. If the daemon is unreachable and the unit is not installed, the TUI starts directly in setup.
 2. **Add** (`a`): step 1/3 press the side button on the mouse, step 2/3 press the target key or combination on the keyboard, step 3/3 save with `enter` (`t` re-learns the target, `esc` discards).
@@ -73,7 +73,7 @@ sudo ./skb-linux-amd64 install --admin-uid "$(id -u)"
 
 `esc` cancels every learning phase and therefore cannot be learned as a target key. While learning the target, all keyboards that are not grabbed are read without grabbing them; a keyboard grabbed by another program (e.g. input-remapper) cannot be learned. The timeout per learning step is 10 s; the remaining-time display refreshes with the status poll.
 
-**Note on installing from the TUI:** Setup runs `pkexec` on the path of the binary the TUI was started from and copies exactly that binary to `/usr/local/bin/skb`. For maximum security, perform the initial installation with `task install` (sudo) and then start the TUI as `/usr/local/bin/skb tui`.
+**Note on installing from the TUI:** Setup runs `pkexec` on the path of the binary the TUI was started from and copies exactly that binary to `/usr/local/bin/skb`. For maximum security, perform the initial installation with `task install` (sudo) and then start the TUI as `/usr/local/bin/skb`.
 
 ## Configuration and permissions
 
@@ -122,7 +122,7 @@ input-remapper must be disabled for the Darkstar, otherwise grabbing fails with 
 
 ## Status
 
-- `skb tui` shows devices (wired/wireless, status, errors) and mappings.
+- `skb` (without a command) shows devices (wired/wireless, status, errors) and mappings.
 - `journalctl -u skb` or `task logs`. Pressed keys are never logged.
 
 ## Limitations
