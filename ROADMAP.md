@@ -8,7 +8,7 @@
 
 ## Installation
 
-- [ ] Create a `.desktop` entry during installation (at least for KDE Plasma)
+- [x] Create a `.desktop` entry during installation (at least for KDE Plasma)
 
 ## TUI
 
