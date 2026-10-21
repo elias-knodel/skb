@@ -46,8 +46,20 @@ Go runs exclusively in a container; Go is not required on the host.
 ```sh
 task qa          # build, tidy, lint, tests (-race), govulncheck
 task build       # static binary at ./bin/skb
+task dist        # release binary and SHA256SUMS at ./dist (amd64)
 task install     # sudo ./bin/skb install --admin-uid <uid>: install binary, unit and config
 task uninstall   # remove binary and unit, /etc/skb is kept
+```
+
+## Releases
+
+Publishing a GitHub release with a `vX.Y.Z` tag runs `task qa`, builds `skb-linux-amd64` with the tag as version, and attaches it together with `SHA256SUMS` and a build provenance attestation. To install a release:
+
+```sh
+sha256sum -c SHA256SUMS
+gh attestation verify skb-linux-amd64 --repo elias-knodel/skb
+chmod +x skb-linux-amd64
+sudo ./skb-linux-amd64 install --admin-uid "$(id -u)"
 ```
 
 ## TUI workflow
