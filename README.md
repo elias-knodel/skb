@@ -120,3 +120,7 @@ input-remapper must be disabled for the Darkstar, otherwise grabbing fails with 
 - The virtual device cannot set ABS ranges; the offered `ABS_VOLUME` code gets the range 0..0.
 - A side button already held down when learning starts is not captured; press it again.
 - A TUI of a newer version running against an older daemon reports "daemon outdated" and refers to setup.
+
+## Contributing
+
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org) (`commitlint.config.mjs`). Branch names start with a type and a slash, e.g. `feat/…`, `fix/…`, `docs/…` or `ci/…`. Pull requests check both and run `task qa`; `govulncheck` additionally runs weekly.
