@@ -11,6 +11,7 @@ const (
 	InputGuard    = inputGuard
 	FlashDuration = flashDuration
 	SpinInterval  = spinFPS
+	RefreshFrames = refreshMinFrames
 )
 
 // ExecDone builds the message of a finished privileged command.

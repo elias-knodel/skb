@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
@@ -113,6 +114,11 @@ func (m Model) headerView() string {
 		parts = append(parts, badgeStyle(colRed).Render("● unreachable"))
 	default:
 		parts = append(parts, badgeStyle(colGreen).Render("● running"))
+	}
+
+	if m.refreshing {
+		frames := spinner.MiniDot.Frames
+		parts = append(parts, accent.Render(frames[m.refreshFrame%len(frames)])+dimStyle.Render(" refreshing"))
 	}
 
 	return strings.Join(parts, " ")
@@ -333,7 +339,7 @@ func (m Model) statusKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q", keyCtrlC:
 		return m, tea.Quit
 	case "r":
-		m, cmd := m.fetch(false)
+		m, cmd := m.refresh(false)
 
 		return m, cmd
 	case "?":
