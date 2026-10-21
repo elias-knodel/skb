@@ -625,3 +625,97 @@ func TestDeleteViewShowsLabel(t *testing.T) {
 	r.key("d")
 	r.wantLine("→", "ß")
 }
+
+// fireRefresh advances the refresh spinner n frames and reports whether the
+// last frame rescheduled it.
+func fireRefresh(r *rig, n int) bool {
+	r.t.Helper()
+
+	var cmd tea.Cmd
+	for range n {
+		cmd = r.update(r.fire(tui.SpinInterval))
+	}
+
+	return cmd != nil
+}
+
+func TestRefreshSpinnerMinimumDuration(t *testing.T) {
+	t.Parallel()
+
+	r := newRig(t, adminStatus())
+	r.loaded()
+	r.settle(r.key("r"))
+	r.wantView("refreshing")
+
+	if !fireRefresh(r, tui.RefreshFrames-1) {
+		t.Fatal("spinner stopped before the minimum duration")
+	}
+
+	r.wantView("refreshing")
+
+	if fireRefresh(r, 1) {
+		t.Error("spinner rescheduled after the minimum duration")
+	}
+
+	r.wantNoView("refreshing")
+}
+
+func TestRefreshSpinnerWaitsForResult(t *testing.T) {
+	t.Parallel()
+
+	r := newRig(t, adminStatus())
+	r.loaded()
+
+	cmd := r.key("r")
+
+	if !fireRefresh(r, tui.RefreshFrames) {
+		t.Fatal("spinner stopped while the fetch is pending")
+	}
+
+	r.settle(cmd)
+
+	if fireRefresh(r, 1) {
+		t.Error("spinner rescheduled after the fetch returned")
+	}
+
+	r.wantNoView("refreshing")
+}
+
+func TestRefreshSpinnerStaleTickDropped(t *testing.T) {
+	t.Parallel()
+
+	r := newRig(t, adminStatus())
+	r.loaded()
+	r.settle(r.key("r"))
+
+	old := r.fire(tui.SpinInterval)
+
+	r.settle(r.key("r"))
+
+	if cmd := r.update(old); cmd != nil {
+		t.Error("tick of an older refresh rescheduled")
+	}
+}
+
+func TestSetupRecheckShowsSpinner(t *testing.T) {
+	t.Parallel()
+
+	r := newRig(t, adminStatus())
+	r.loaded()
+	r.key("s")
+
+	cmd := r.key("r")
+	r.wantView("refreshing")
+
+	if !fireRefresh(r, tui.RefreshFrames) {
+		t.Fatal("spinner stopped while the probe is pending")
+	}
+
+	r.settle(cmd)
+
+	if fireRefresh(r, 1) {
+		t.Error("spinner rescheduled after the probe returned")
+	}
+
+	r.wantNoView("refreshing")
+}

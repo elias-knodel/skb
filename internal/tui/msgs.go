@@ -57,6 +57,8 @@ type (
 		session int
 		target  bool
 	}
+	// refreshTickMsg advances the spinner frame of one manual refresh.
+	refreshTickMsg struct{ seq int }
 	// spinTickMsg advances the spinner frame of one learn session.
 	spinTickMsg struct{ session int }
 	// confirmArmMsg ends the input guard of the confirm view.

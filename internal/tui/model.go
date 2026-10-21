@@ -38,6 +38,8 @@ const (
 	flashDuration = 3 * time.Second
 	// spinFPS is the frame interval of spinner.MiniDot.
 	spinFPS = time.Second / 12
+	// refreshMinFrames keeps the refresh spinner visible for at least this many frames.
+	refreshMinFrames = 6
 
 	defaultWidth = 80
 	maxWidth     = 100
@@ -125,6 +127,15 @@ type Model struct {
 	remaining int
 	busyTries int
 	spinFrame int
+
+	// refreshSeq identifies the manual refresh; its spinner runs until refreshMinFrames
+	// have passed and neither the fetch numbered refreshFetch (0 once returned) nor the
+	// probe is pending.
+	refreshing   bool
+	refreshSeq   int
+	refreshFrame int
+	refreshFetch int
+	refreshProbe bool
 
 	// armed ends the input guard of the confirm view; pending marks a save or delete in flight.
 	armed   bool
@@ -235,6 +246,60 @@ func (m Model) probeCmd() tea.Cmd {
 	}
 }
 
+// refresh starts a manual status fetch, or a probe in the setup view, with a
+// visible spinner.
+func (m Model) refresh(probe bool) (Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	if probe {
+		cmd = m.probeCmd()
+	} else {
+		m, cmd = m.fetch(false)
+	}
+
+	m.refreshSeq++
+	m.refreshing, m.refreshFrame = true, 0
+	m.refreshFetch, m.refreshProbe = 0, probe
+
+	if !probe {
+		m.refreshFetch = m.fetchSeq
+	}
+
+	return m, tea.Batch(cmd, m.refreshTick())
+}
+
+func (m Model) refreshTick() tea.Cmd {
+	seq := m.refreshSeq
+
+	return m.cfg.Tick(spinFPS, func(time.Time) tea.Msg { return refreshTickMsg{seq: seq} })
+}
+
+// fetchReturned clears the pending refresh fetch once a result of it or a
+// newer fetch arrives.
+func (m Model) fetchReturned(seq int) Model {
+	if seq >= m.refreshFetch {
+		m.refreshFetch = 0
+	}
+
+	return m
+}
+
+func (m Model) onRefreshTick(msg refreshTickMsg) (tea.Model, tea.Cmd) {
+	if msg.seq != m.refreshSeq || !m.refreshing {
+		return m, nil
+	}
+
+	m.refreshFrame++
+
+	if m.refreshFrame >= refreshMinFrames && m.refreshFetch == 0 && !m.refreshProbe {
+		m.refreshing = false
+
+		return m, nil
+	}
+
+	return m, m.refreshTick()
+}
+
 // Update handles messages and key presses.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -243,6 +308,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m.layout(), nil
 	case statusMsg:
+		m = m.fetchReturned(msg.seq)
+
 		if msg.seq < m.appliedSeq {
 			return m, m.pollCmd(msg.poll)
 		}
@@ -253,6 +320,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m, m.pollCmd(msg.poll)
 	case statusErrMsg:
+		m = m.fetchReturned(msg.seq)
+
 		if msg.seq < m.appliedSeq {
 			return m, m.pollCmd(msg.poll)
 		}
@@ -267,6 +336,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.pollCmd(msg.poll)
 	case tickMsg:
 		return m.fetch(true)
+	case refreshTickMsg:
+		return m.onRefreshTick(msg)
 	case probeMsg:
 		return m.onProbe(msg), nil
 	case execDoneMsg:
@@ -302,6 +373,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) onProbe(msg probeMsg) Model {
 	m.setup, m.probed = msg.state, true
+	m.refreshProbe = false
 
 	// A missing daemon and no installed unit: start in setup.
 	if m.statusErr != nil && !msg.state.UnitInstalled && m.view == viewStatus && !m.setupAuto {

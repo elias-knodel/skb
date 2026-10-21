@@ -49,7 +49,7 @@ func (m Model) setupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "?":
 		m.help.ShowAll = !m.help.ShowAll
 	case "r":
-		return m, m.probeCmd()
+		return m.refresh(true)
 	case "i":
 		return m.runPrivileged("install", "--admin-uid", uid)
 	case "x":
