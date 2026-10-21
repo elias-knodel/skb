@@ -47,8 +47,8 @@ Go runs exclusively in a container; Go is not required on the host.
 task qa          # build, tidy, lint, tests (-race), govulncheck
 task build       # static binary at ./bin/skb
 task dist        # release binary and SHA256SUMS at ./dist (amd64)
-task install     # sudo ./bin/skb install --admin-uid <uid>: install binary, unit and config
-task uninstall   # remove binary and unit, /etc/skb is kept
+task install     # sudo ./bin/skb install --admin-uid <uid>: install binary, unit, config and desktop entry
+task uninstall   # remove binary, unit and desktop entry, /etc/skb is kept
 ```
 
 ## Releases
@@ -72,6 +72,8 @@ sudo ./skb-linux-amd64 install --admin-uid "$(id -u)"
 4. **Delete** (`d`, then `y`).
 
 `esc` cancels every learning phase and therefore cannot be learned as a target key. While learning the target, all keyboards that are not grabbed are read without grabbing them; a keyboard grabbed by another program (e.g. input-remapper) cannot be learned. The timeout per learning step is 10 s; the remaining-time display refreshes with the status poll.
+
+After installation, skb appears in the application launcher (search "skb" or "mouse", category System Settings / Hardware) and opens in the default terminal; the entry is `/usr/local/share/applications/skb.desktop`.
 
 **Note on installing from the TUI:** Setup runs `pkexec` on the path of the binary the TUI was started from and copies exactly that binary to `/usr/local/bin/skb`. For maximum security, perform the initial installation with `task install` (sudo) and then start the TUI as `/usr/local/bin/skb`.
 

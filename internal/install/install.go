@@ -1,4 +1,4 @@
-// Package install copies the binary, unit and default configuration to
+// Package install copies the binary, unit, desktop entry and default configuration to
 // their fixed system locations. It is meant to run as root, through pkexec or
 // sudo, and never accepts paths from its arguments.
 package install
@@ -27,6 +27,10 @@ const (
 	binRel    = "usr/local/bin/skb"
 	unitRel   = "etc/systemd/system/skb.service"
 	configRel = "etc/skb/config.toml"
+
+	// No cache refresh is needed: Plasma (kded) and GNOME watch the application
+	// directories, and /usr/local/share is in the default XDG_DATA_DIRS.
+	desktopRel = "usr/local/share/applications/skb.desktop"
 
 	unitName          = "skb.service"
 	inputRemapperUnit = "input-remapper.service"
@@ -82,6 +86,10 @@ func (i Installer) Install(ctx context.Context, opts Options) error {
 
 	if err := writeAtomic(i.path(unitRel), deploy.Unit, 0o644); err != nil {
 		return fmt.Errorf("install unit: %w", err)
+	}
+
+	if err := writeAtomic(i.path(desktopRel), deploy.Desktop, 0o644); err != nil {
+		return fmt.Errorf("install desktop entry: %w", err)
 	}
 
 	if save {
@@ -167,7 +175,7 @@ func (i Installer) systemctl(ctx context.Context, args ...string) error {
 	return nil
 }
 
-// Uninstall stops the service and removes unit and binary; the configuration stays.
+// Uninstall stops the service and removes unit, desktop entry and binary; the configuration stays.
 func (i Installer) Uninstall(ctx context.Context) error {
 	if i.Euid() != 0 {
 		return errors.New("uninstall must run as root")
@@ -176,7 +184,7 @@ func (i Installer) Uninstall(ctx context.Context) error {
 	// A service that is not installed or not running is not an error here.
 	_, _, _ = i.Runner.Run(ctx, "disable", "--now", unitName)
 
-	for _, rel := range []string{unitRel, binRel} {
+	for _, rel := range []string{desktopRel, unitRel, binRel} {
 		if err := os.Remove(i.path(rel)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("remove %s: %w", rel, err)
 		}

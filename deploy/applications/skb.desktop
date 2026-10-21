@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=skb
+GenericName=Mouse Button Remapper
+Comment=Remap the side buttons of the Corsair Darkstar
+Exec=/usr/local/bin/skb
+TryExec=/usr/local/bin/skb
+Icon=input-mouse
+Terminal=true
+Categories=Settings;HardwareSettings;
+Keywords=mouse;button;remap;corsair;darkstar;input;
