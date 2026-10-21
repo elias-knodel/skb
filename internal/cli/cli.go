@@ -104,8 +104,8 @@ Flags:
 	_, _ = fmt.Fprint(w, `
 Commands:
   daemon        grab the configured devices and remap their keys
-  install       install binary, unit and config (run as root; see TUI setup)
-  uninstall     remove binary and unit, keeping the config
+  install       install binary, unit, config and desktop entry (run as root; see TUI setup)
+  uninstall     remove binary, unit and desktop entry, keeping the config
   check-config  validate a configuration file
 
 Use "skb <command> --help" for the flags of a command.
