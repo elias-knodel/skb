@@ -62,6 +62,10 @@ chmod +x skb-linux-amd64
 sudo ./skb-linux-amd64 install --admin-uid "$(id -u)"
 ```
 
+## Updates
+
+When the TUI starts, it asks the GitHub API (`api.github.com/repos/elias-knodel/skb/releases/latest`) at most once per day whether a newer release exists and caches the answer in `$XDG_CACHE_HOME/skb/update.json` (default `~/.cache/skb/update.json`). A newer version is shown in the TUI header with the release URL; nothing is downloaded or installed. Network failures are silent. Development builds (`dev`, `git describe` output with a commit suffix or `-dirty`) skip the check. `skb check-update` queries GitHub immediately, ignoring and refreshing the cache, prints the current and latest version, and exits with 1 if the request fails. Pre-releases are never offered; a running pre-release is notified when the corresponding stable release exists.
+
 ## TUI workflow
 
 `./bin/skb` (or `skb` after installation; TUI flags such as `--interval 1s` can be passed directly):
