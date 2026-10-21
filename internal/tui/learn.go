@@ -7,8 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/elias-knodel/skb/internal/config"
 	"github.com/elias-knodel/skb/internal/ipc"
 )
 
@@ -34,8 +36,8 @@ func (m Model) startAction(key string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		m.from = sel.From
-		m.view = viewDeleteConfirm
+		m.from, m.to, m.label = sel.From, sel.To, sel.Label
+		m.view, m.pending = viewDeleteConfirm, false
 
 		return m, nil
 	}
@@ -53,11 +55,12 @@ func (m Model) startSource() (tea.Model, tea.Cmd) {
 		return sourceMsg{session: session, key: key, err: err}
 	}
 
-	return m, tea.Batch(learnCmd, m.learnTick())
+	return m, tea.Batch(learnCmd, m.learnTick(), m.spinTick())
 }
 
 func (m Model) startTarget() (tea.Model, tea.Cmd) {
 	m, ctx := m.newSession()
+	m.label, m.labelSet = "", false
 	m.view = viewLearnTarget
 
 	client, session := m.cfg.Client, m.session
@@ -68,7 +71,7 @@ func (m Model) startTarget() (tea.Model, tea.Cmd) {
 		return targetMsg{session: session, to: to, err: err}
 	}
 
-	return m, tea.Batch(learnCmd, m.learnTick())
+	return m, tea.Batch(learnCmd, m.learnTick(), m.spinTick())
 }
 
 // newSession cancels the previous learn command and opens a new session.
@@ -78,6 +81,7 @@ func (m Model) newSession() (Model, context.Context) {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
 	m.remaining = int(learnTimeout / time.Second)
+	m.spinFrame = 0
 
 	return m, ctx
 }
@@ -116,18 +120,39 @@ func (m Model) onTarget(msg targetMsg) (tea.Model, tea.Cmd) {
 	m = m.stopLearn()
 	m.to = msg.to
 	m.view = viewConfirm
+	m.armed, m.pending = false, false
 
-	return m, nil
+	session := m.session
+
+	return m, m.cfg.Tick(inputGuard, func(time.Time) tea.Msg { return confirmArmMsg{session: session} })
+}
+
+// onConfirmArm ends the input guard if it belongs to the current confirm view.
+func (m Model) onConfirmArm(msg confirmArmMsg) Model {
+	if msg.session == m.session && m.view == viewConfirm {
+		m.armed = true
+	}
+
+	return m
 }
 
 // learnKey handles keys while a learn command runs. Esc aborts, so it cannot
-// be learned as a target; all other keys are ignored.
+// be learned as a target; ctrl+c is ignored during the target step because
+// it may still be in flight from the learned key.
 func (m Model) learnKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.view == viewLearnTarget {
+		m = m.captureLabel(msg)
+	}
+
 	switch msg.String() {
 	case keyEsc:
 		m = m.stopLearn()
 		m.view = viewStatus
 	case keyCtrlC:
+		if m.view == viewLearnTarget {
+			return m, nil
+		}
+
 		m = m.stopLearn()
 
 		return m, tea.Quit
@@ -136,30 +161,93 @@ func (m Model) learnKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) viewLearn(step string) string {
-	return titleStyle.Render("skb") + "\n\n" + step + "\n" +
-		dimStyle.Render(fmt.Sprintf("%d s left - esc cancels", m.remaining)) + "\n"
+func stepDots(step int) string {
+	dots := make([]string, 3)
+
+	for i := range dots {
+		if i < step {
+			dots[i] = accent.Render("●")
+		} else {
+			dots[i] = dimStyle.Render("○")
+		}
+	}
+
+	return strings.Join(dots, " ")
+}
+
+// mappingLine renders the learned mapping.
+func mappingLine(from string, to []string, label string) string {
+	line := sourceStyle.Bold(true).Render(from) + "  " + arrowStyle.Render("→") + "  " +
+		targetStyle.Bold(true).Render(strings.Join(to, "+"))
+
+	if len(to) > 0 {
+		line += "\n" + dimStyle.Render(keyLabel(from)+" → "+targetLabel(to, label))
+	}
+
+	return line
+}
+
+func (m Model) viewLearn(step int, text string) string {
+	var b strings.Builder
+
+	b.WriteString(stepDots(step) + "\n\n")
+	b.WriteString(titleStyle.Render(fmt.Sprintf("Step %d/3", step)) + dimStyle.Render(" · ") + text + "\n")
+
+	if step == 2 {
+		b.WriteString(dimStyle.Render("Source  ") + sourceStyle.Render(m.from) + "\n")
+	}
+
+	frames := spinner.MiniDot.Frames
+	ratio := float64(m.remaining) / float64(learnTimeout/time.Second)
+
+	b.WriteString("\n" + accent.Render(frames[m.spinFrame%len(frames)]) + " " + m.bar.ViewAs(ratio) + " " +
+		dimStyle.Render(fmt.Sprintf("%d s", m.remaining)))
+
+	return m.screen(learnBoxStyle.Render(b.String()), "")
 }
 
 func (m Model) confirmView() string {
-	return titleStyle.Render("skb") + "\n\n" +
-		"Step 3/3: " + m.from + " -> " + strings.Join(m.to, "+") + "\n\n" +
-		dimStyle.Render("enter save  t relearn target  esc discard") + "\n"
+	content := stepDots(3) + "\n\n" + titleStyle.Render("Step 3/3 · Save this mapping?") + "\n\n" +
+		mappingLine(m.from, m.to, m.label)
+
+	if m.pending {
+		content += "\n\n" + dimStyle.Render("Saving…")
+	}
+
+	return m.screen(confirmBoxStyle.Render(content), "")
 }
 
 func (m Model) confirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case keyCtrlC, "q":
+	if !m.armed {
+		m = m.captureLabel(msg)
+
+		return m, nil
+	}
+
+	s := msg.String()
+
+	if m.pending {
+		if s == keyCtrlC {
+			return m, tea.Quit
+		}
+
+		return m, nil
+	}
+
+	switch s {
+	case keyCtrlC:
 		return m, tea.Quit
-	case keyEsc:
+	case keyEsc, "q":
 		m.view = viewStatus
 	case "t":
 		m.busyTries = 0
 
 		return m.startTarget()
 	case "enter":
+		m.pending = true
+
 		client := m.cfg.Client
-		args := ipc.SetMappingArgs{From: m.from, To: m.to, OldFrom: m.oldFrom}
+		args := ipc.SetMappingArgs{From: m.from, To: m.to, OldFrom: m.oldFrom, Label: m.label}
 
 		return m, func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
@@ -175,17 +263,32 @@ func (m Model) confirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) deleteView() string {
-	return titleStyle.Render("skb") + "\n\n" + "Delete mapping for " + m.from + "?\n\n" +
-		dimStyle.Render("y delete  n cancel") + "\n"
+	content := titleStyle.Render("Delete mapping?") + "\n\n" + mappingLine(m.from, m.to, m.label)
+
+	if m.pending {
+		content += "\n\n" + dimStyle.Render("Deleting…")
+	}
+
+	return m.screen(deleteBoxStyle.Render(content), "")
 }
 
 func (m Model) deleteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case keyCtrlC, "q":
+	s := msg.String()
+
+	if s == keyCtrlC {
 		return m, tea.Quit
-	case "n", keyEsc:
+	}
+
+	if m.pending {
+		return m, nil
+	}
+
+	switch s {
+	case "n", keyEsc, "q":
 		m.view = viewStatus
 	case "y":
+		m.pending = true
+
 		client, from := m.cfg.Client, m.from
 
 		return m, func() tea.Msg {
@@ -211,6 +314,23 @@ func (m Model) learnTick() tea.Cmd {
 	session := m.session
 
 	return m.cfg.Tick(time.Second, func(time.Time) tea.Msg { return learnTickMsg{session: session} })
+}
+
+// spinTick schedules the next spinner frame of the current session.
+func (m Model) spinTick() tea.Cmd {
+	session := m.session
+
+	return m.cfg.Tick(spinFPS, func(time.Time) tea.Msg { return spinTickMsg{session: session} })
+}
+
+func (m Model) onSpinTick(msg spinTickMsg) (tea.Model, tea.Cmd) {
+	if msg.session != m.session || !m.learning() {
+		return m, nil
+	}
+
+	m.spinFrame++
+
+	return m, m.spinTick()
 }
 
 func (m Model) learning() bool {
@@ -258,4 +378,25 @@ func (m Model) onLearnRetry(msg learnRetryMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m.startSource()
+}
+
+// captureLabel records the character of the first terminal key of the target
+// session. The learned key reaches the terminal as well, possibly after the
+// daemon answered. Only plain printable runes count; it never triggers actions.
+func (m Model) captureLabel(msg tea.KeyMsg) Model {
+	if m.labelSet {
+		return m
+	}
+
+	m.labelSet = true
+
+	if msg.Type != tea.KeyRunes || msg.Alt || msg.Paste {
+		return m
+	}
+
+	if s := string(msg.Runes); s != "" && config.ValidateLabel(s) == nil {
+		m.label = s
+	}
+
+	return m
 }

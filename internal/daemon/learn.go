@@ -66,7 +66,7 @@ func mappingList(cfg *config.Config) []ipc.Mapping {
 			to = append(to, keys.Name(code))
 		}
 
-		out = append(out, ipc.Mapping{From: keys.Name(m.From), To: to})
+		out = append(out, ipc.Mapping{From: keys.Name(m.From), To: to, Label: m.Label})
 	}
 
 	return out
@@ -303,8 +303,12 @@ func parseMapping(args ipc.SetMappingArgs) (config.Mapping, evdev.EvCode, error)
 		codes = append(codes, code)
 	}
 
+	if err := config.ValidateLabel(args.Label); err != nil {
+		return config.Mapping{}, 0, apiErr(ipc.CodeInvalid, err.Error())
+	}
+
 	last := len(codes) - 1
-	m := config.Mapping{From: from, Key: codes[last]}
+	m := config.Mapping{From: from, Key: codes[last], Label: args.Label}
 
 	if last > 0 {
 		m.Modifiers = codes[:last]

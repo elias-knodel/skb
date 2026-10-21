@@ -44,8 +44,9 @@ type Device struct {
 
 // Mapping is a configured key mapping in display form.
 type Mapping struct {
-	From string   `json:"from"`
-	To   []string `json:"to"`
+	From  string   `json:"from"`
+	To    []string `json:"to"`
+	Label string   `json:"label,omitempty"`
 }
 
 // SetMappingArgs are the arguments of the set_mapping operation. OldFrom,
@@ -54,4 +55,5 @@ type SetMappingArgs struct {
 	From    string   `json:"from"`
 	To      []string `json:"to"`
 	OldFrom string   `json:"old_from,omitempty"`
+	Label   string   `json:"label,omitempty"`
 }

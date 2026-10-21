@@ -6,6 +6,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
 
 	"github.com/elias-knodel/skb/internal/ipc"
 )
@@ -14,6 +16,14 @@ import (
 const (
 	productWired    = 0x1bb2
 	productWireless = 0x1bdc
+)
+
+const (
+	hintUnreachable = "daemon unreachable - press s for setup or r to retry"
+	// minMapLines is the number of mapping lines kept visible on small terminals.
+	minMapLines = 4
+
+	hintOutdated = "daemon outdated - reinstall via setup (s)"
 )
 
 func connKind(product uint16) string {
@@ -27,85 +37,259 @@ func connKind(product uint16) string {
 	}
 }
 
-func (m Model) statusView() string {
-	var b strings.Builder
+// daemonUp reports a loaded status without a fetch error.
+func (m Model) daemonUp() bool { return m.loaded && m.statusErr == nil }
 
-	b.WriteString(titleStyle.Render("skb") + "\n\n")
+// canMutate reports whether mappings may be changed.
+func (m Model) canMutate() bool { return m.daemonUp() && m.status.CallerIsAdmin }
+
+func (m Model) statusView() string {
+	var body string
 
 	switch {
 	case !m.loaded:
-		b.WriteString(dimStyle.Render("connecting...") + "\n")
-	case m.statusErr != nil && outdated(m.statusErr):
-		b.WriteString(errStyle.Render("daemon outdated - reinstall via setup (s)") + "\n")
+		body = dimStyle.Render("connecting…")
 	case m.statusErr != nil:
-		b.WriteString(errStyle.Render("daemon unreachable: "+m.statusErr.Error()) + "\n")
+		body = m.unreachableCard()
 	default:
-		m.writeStatus(&b)
+		body = m.statusBody()
+	}
+
+	return m.screen(body, m.extraBlock())
+}
+
+// extraBlock renders the flash and hint lines below the body, wrapped to the
+// content width.
+func (m Model) extraBlock() string {
+	var extra []string
+
+	if m.flash != "" {
+		extra = append(extra, flashStyle.Render("✔ "+m.flash))
 	}
 
 	if m.hint != "" {
-		b.WriteString("\n" + warnStyle.Render(m.hint) + "\n")
+		extra = append(extra, warnStyle.Render(m.hint))
 	}
 
-	b.WriteString("\n" + dimStyle.Render(m.help()) + "\n")
+	if len(extra) == 0 {
+		return ""
+	}
 
-	return b.String()
+	return lipgloss.NewStyle().Width(m.contentWidth()).Render(strings.Join(extra, "\n"))
 }
 
-func (m Model) help() string {
-	if m.statusErr == nil && m.loaded && !m.status.CallerIsAdmin {
-		return "s setup  r refresh  q quit"
+func (m Model) unreachableCard() string {
+	text, hint := "daemon unreachable: "+m.statusErr.Error(), "press s for setup or r to retry"
+	if outdated(m.statusErr) {
+		text, hint = hintOutdated, ""
 	}
 
-	return "a add  e edit  d delete  s setup  r refresh  q quit"
+	content := errStyle.Render(text)
+	if hint != "" {
+		content += "\n" + dimStyle.Render(hint)
+	}
+
+	return errCardStyle.Width(m.contentWidth() - 2).Render(content)
 }
 
-func (m Model) writeStatus(b *strings.Builder) {
-	st := m.status
+func (m Model) headerView() string {
+	parts := []string{pillStyle.Render(" skb ")}
 
-	fmt.Fprintf(b, "version %s, up since %s\n\n", st.Version, st.StartedAt.Format(time.DateTime))
-
-	b.WriteString(titleStyle.Render("Devices") + "\n")
-
-	if len(st.Devices) == 0 {
-		b.WriteString(dimStyle.Render("  none matched") + "\n")
-	}
-
-	for _, d := range st.Devices {
-		state := warnStyle.Render("not grabbed")
-		if d.Grabbed {
-			state = okStyle.Render("grabbed")
+	if m.daemonUp() {
+		info := "version " + m.status.Version
+		if up := m.uptime(); up != "" {
+			info += " · up " + up
 		}
 
-		fmt.Fprintf(b, "  %s  %s  %s  0x%04x:0x%04x  %s\n", d.Path, d.Name, connKind(d.Product), d.Vendor, d.Product, state)
+		parts = append(parts, dimStyle.Render(info))
+	}
 
-		if d.VirtualName != "" {
-			fmt.Fprintf(b, "    -> %s\n", d.VirtualName)
+	switch {
+	case !m.loaded:
+		parts = append(parts, dimStyle.Render("● connecting"))
+	case m.statusErr != nil && outdated(m.statusErr):
+		parts = append(parts, badgeStyle(colRed).Render("● outdated"))
+	case m.statusErr != nil:
+		parts = append(parts, badgeStyle(colRed).Render("● unreachable"))
+	default:
+		parts = append(parts, badgeStyle(colGreen).Render("● running"))
+	}
+
+	return strings.Join(parts, " ")
+}
+
+func (m Model) uptime() string {
+	started := m.status.StartedAt
+	if started.IsZero() {
+		return ""
+	}
+
+	d := max(m.cfg.Now().Sub(started).Round(time.Minute), 0)
+	days, hours, mins := int(d.Hours())/24, int(d.Hours())%24, int(d.Minutes())%60
+
+	switch {
+	case days > 0:
+		return fmt.Sprintf("%dd %dh", days, hours)
+	case hours > 0:
+		return fmt.Sprintf("%dh%02dm", hours, mins)
+	default:
+		return fmt.Sprintf("%dm", mins)
+	}
+}
+
+func (m Model) statusBody() string {
+	w := m.contentWidth()
+
+	var devices strings.Builder
+
+	devices.WriteString(titleStyle.Render("Devices") + "\n")
+
+	if len(m.status.Devices) == 0 {
+		devices.WriteString(dimStyle.Render("  none matched"))
+	}
+
+	for i, d := range m.status.Devices {
+		if i > 0 {
+			devices.WriteString("\n")
 		}
 
-		if d.Error != "" {
-			b.WriteString("    " + errStyle.Render(d.Error) + "\n")
+		devices.WriteString(deviceCard(d, w))
+	}
 
-			if strings.Contains(d.Error, "busy") {
-				b.WriteString("    " + warnStyle.Render("input-remapper may hold this device; disable it in setup (s, x)") + "\n")
-			}
+	dev, rows := devices.String(), 0
+
+	if m.height > 0 {
+		avail := m.bodyAvail(m.extraBlock())
+
+		// Keep a few mapping lines visible by cutting the device list first.
+		minMaps := min(len(m.status.Mappings)+1, minMapLines)
+		dev = fitHeight(dev, avail-2-minMaps)
+		rows = max(avail-lipgloss.Height(dev)-2, 2)
+	}
+
+	return dev + "\n\n" + titleStyle.Render("Mappings") + "\n" + m.mappingsView(rows)
+}
+
+func deviceCard(d ipc.Device, w int) string {
+	badge := badgeStyle(colYellow).Render("not grabbed")
+
+	switch {
+	case d.Error != "":
+		badge = badgeStyle(colRed).Render("error")
+	case d.Grabbed:
+		badge = badgeStyle(colGreen).Render("grabbed")
+	}
+
+	lines := []string{
+		titleStyle.Render(d.Name) + "  " + badge + "  " + dimStyle.Render(connKind(d.Product)),
+		dimStyle.Render(fmt.Sprintf("%s · 0x%04x:0x%04x", d.Path, d.Vendor, d.Product)),
+	}
+
+	if d.VirtualName != "" {
+		lines = append(lines, dimStyle.Render("→ "+d.VirtualName))
+	}
+
+	if d.Error != "" {
+		lines = append(lines, errStyle.Render(d.Error))
+
+		if strings.Contains(d.Error, "busy") {
+			lines = append(lines, warnStyle.Render("input-remapper may hold this device; disable it in setup (s, x)"))
 		}
 	}
 
-	b.WriteString("\n" + titleStyle.Render("Mappings") + "\n")
+	return cardStyle.Width(w - 2).Render(strings.Join(lines, "\n"))
+}
 
-	if len(st.Mappings) == 0 {
-		b.WriteString(dimStyle.Render("  none - press a to add one") + "\n")
+// mappingsView renders the mappings table; maxLines <= 0 means unlimited.
+func (m Model) mappingsView(maxLines int) string {
+	mps := m.status.Mappings
+
+	if len(mps) == 0 {
+		text := "  none"
+		if m.canMutate() {
+			text = "  none - press a to add one"
+		}
+
+		return dimStyle.Render(text)
 	}
 
-	for i, mp := range st.Mappings {
+	visible := len(mps)
+
+	// One line for the table header; two more for the scroll indicators.
+	if maxLines > 0 && len(mps) > maxLines-1 {
+		visible = max(maxLines-3, 1)
+	}
+
+	offset := max(min(m.cursor-visible/2, len(mps)-visible), 0)
+	labels := m.contentWidth() >= wideWidth
+
+	rows := make([][]string, 0, visible)
+
+	for i := offset; i < offset+visible; i++ {
 		mark := " "
 		if i == m.cursor {
-			mark = cursorMark
+			mark = "›"
 		}
 
-		fmt.Fprintf(b, " %s %s -> %s\n", mark, mp.From, strings.Join(mp.To, "+"))
+		row := []string{mark, mps[i].From, "→", strings.Join(mps[i].To, "+")}
+		if labels {
+			row = append(row, keyLabel(mps[i].From)+" → "+targetLabel(mps[i].To, mps[i].Label))
+		}
+
+		rows = append(rows, row)
 	}
+
+	headers := []string{"", "Source", "", "Target"}
+	if labels {
+		headers = append(headers, "Name")
+	}
+
+	t := table.New().
+		Border(lipgloss.HiddenBorder()).
+		BorderTop(false).BorderBottom(false).BorderLeft(false).BorderRight(false).
+		BorderHeader(false).BorderColumn(false).BorderRow(false).
+		Headers(headers...).
+		Rows(rows...).
+		StyleFunc(func(row, col int) lipgloss.Style {
+			if row == table.HeaderRow {
+				return tableHeaderStyle
+			}
+
+			s := tableCellStyle
+
+			switch col {
+			case 0:
+				s = s.Foreground(colPurple)
+			case 1:
+				s = s.Foreground(colPink)
+			case 2:
+				s = s.Foreground(colDim)
+			case 3:
+				s = s.Foreground(colCyan)
+			default:
+				s = s.Foreground(colDim)
+			}
+
+			if row == m.cursor-offset {
+				s = s.Inherit(tableSelectedStyle)
+			}
+
+			return s
+		})
+
+	var b strings.Builder
+
+	if offset > 0 {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("↑ %d more", offset)) + "\n")
+	}
+
+	b.WriteString(t.String())
+
+	if rest := len(mps) - offset - visible; rest > 0 {
+		b.WriteString("\n" + dimStyle.Render(fmt.Sprintf("↓ %d more", rest)))
+	}
+
+	return b.String()
 }
 
 func (m Model) selected() (ipc.Mapping, bool) {
@@ -130,6 +314,10 @@ func (m Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case viewSetup:
 		return m.setupKey(msg)
 	case viewError:
+		if msg.String() == keyCtrlC {
+			return m, tea.Quit
+		}
+
 		m.view = viewStatus
 
 		return m, nil
@@ -145,7 +333,11 @@ func (m Model) statusKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q", keyCtrlC:
 		return m, tea.Quit
 	case "r":
-		return m, m.fetchCmd()
+		m, cmd := m.fetch(false)
+
+		return m, cmd
+	case "?":
+		m.help.ShowAll = !m.help.ShowAll
 	case "up", "k":
 		m.cursor = max(m.cursor-1, 0)
 	case "down", "j":
@@ -155,7 +347,15 @@ func (m Model) statusKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		return m, m.probeCmd()
 	case "a", "e", "d":
-		if !m.status.CallerIsAdmin {
+		switch {
+		case !m.daemonUp():
+			m.hint = hintUnreachable
+			if m.statusErr != nil && outdated(m.statusErr) {
+				m.hint = hintOutdated
+			}
+
+			return m, nil
+		case !m.status.CallerIsAdmin:
 			m.hint = m.notAdminText()
 
 			return m, nil
