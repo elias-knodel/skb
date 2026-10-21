@@ -121,7 +121,13 @@ func (m Model) headerView() string {
 		parts = append(parts, accent.Render(frames[m.refreshFrame%len(frames)])+dimStyle.Render(" refreshing"))
 	}
 
-	return strings.Join(parts, " ")
+	header := strings.Join(parts, " ")
+	if m.update.Available {
+		header += "\n" + warnStyle.Render("update available: "+sanitize(m.update.Latest)) +
+			dimStyle.Render(" · "+sanitize(m.update.URL))
+	}
+
+	return header
 }
 
 func (m Model) uptime() string {
