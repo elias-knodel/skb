@@ -22,6 +22,7 @@ import (
 	"github.com/elias-knodel/skb/internal/ipc"
 	"github.com/elias-knodel/skb/internal/systemd"
 	"github.com/elias-knodel/skb/internal/tui"
+	"github.com/elias-knodel/skb/internal/update"
 )
 
 // Exit codes.
@@ -62,6 +63,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, version s
 			run = runUninstall
 		case "check-config":
 			run = runCheckConfig
+		case "check-update":
+			run = runCheckUpdate
 		default:
 			_, _ = fmt.Fprintf(stderr, "skb: unknown command %q\n", args[0])
 			usage(stderr)
@@ -107,6 +110,7 @@ Commands:
   install       install binary, unit, config and desktop entry (run as root; see TUI setup)
   uninstall     remove binary, unit and desktop entry, keeping the config
   check-config  validate a configuration file
+  check-update  look up the latest release on GitHub (ignores the daily cache)
 
 Use "skb <command> --help" for the flags of a command.
 `)
@@ -167,7 +171,7 @@ func runCheckConfig(_ context.Context, args []string, stdout, stderr io.Writer, 
 	return nil
 }
 
-func runTUI(ctx context.Context, args []string, _, stderr io.Writer, _ string) error {
+func runTUI(ctx context.Context, args []string, _, stderr io.Writer, version string) error {
 	fs := flag.NewFlagSet("skb", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() { usage(stderr) }
@@ -183,12 +187,20 @@ func runTUI(ctx context.Context, args []string, _, stderr io.Writer, _ string) e
 		return errUsage
 	}
 
+	var checkUpdate func(context.Context) (update.Result, error)
+
+	if cachePath, err := update.DefaultCachePath(); err == nil {
+		checker := update.Checker{CachePath: cachePath, UserAgent: "skb/" + version}
+		checkUpdate = func(ctx context.Context) (update.Result, error) { return checker.CheckDaily(ctx, version) }
+	}
+
 	model := tui.New(tui.Config{
-		Client:   ipc.Client{Socket: *socket},
-		Prober:   tui.NewProber(*socket),
-		Command:  tui.PkexecCommand,
-		UID:      uint32(os.Getuid()), //nolint:gosec // uid is non-negative
-		Interval: *interval,
+		Client:      ipc.Client{Socket: *socket},
+		Prober:      tui.NewProber(*socket),
+		Command:     tui.PkexecCommand,
+		UID:         uint32(os.Getuid()), //nolint:gosec // uid is non-negative
+		Interval:    *interval,
+		CheckUpdate: checkUpdate,
 	})
 
 	// Query the terminal background once, before bubbletea owns stdin.
@@ -299,4 +311,26 @@ func runUninstall(ctx context.Context, args []string, stdout, stderr io.Writer, 
 	}
 
 	return newInstaller(stdout).Uninstall(ctx)
+}
+
+func runCheckUpdate(ctx context.Context, args []string, stdout, stderr io.Writer, version string) error {
+	fs := newFlagSet("check-update", stderr)
+
+	if err := parse(fs, args); err != nil {
+		return err
+	}
+
+	checker := update.Checker{UserAgent: "skb/" + version}
+	if p, err := update.DefaultCachePath(); err == nil {
+		checker.CachePath = p
+	}
+
+	res, err := checker.Check(ctx, version)
+	if err != nil {
+		return err
+	}
+
+	update.Report(stdout, res)
+
+	return nil
 }
