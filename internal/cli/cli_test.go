@@ -137,7 +137,7 @@ func TestCheckConfigDefault(t *testing.T) {
 func TestSubcommandHelp(t *testing.T) {
 	t.Parallel()
 
-	for _, sub := range []string{"check-config", "daemon"} {
+	for _, sub := range []string{"check-config", "check-update", "daemon"} {
 		if code, _, _ := run(sub, "--help"); code != 0 {
 			t.Errorf("%s --help: code = %d", sub, code)
 		}
@@ -148,7 +148,7 @@ func TestUsageListsCommands(t *testing.T) {
 	t.Parallel()
 
 	_, _, stderr := run("--help")
-	for _, want := range []string{"install", "uninstall", "daemon", "check-config"} {
+	for _, want := range []string{"install", "uninstall", "daemon", "check-config", "check-update"} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("usage lacks %q", want)
 		}

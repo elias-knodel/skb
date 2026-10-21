@@ -1,6 +1,9 @@
 package tui
 
-import "github.com/elias-knodel/skb/internal/ipc"
+import (
+	"github.com/elias-knodel/skb/internal/ipc"
+	"github.com/elias-knodel/skb/internal/update"
+)
 
 type (
 	// statusMsg carries a status fetch; poll marks results of the poll chain
@@ -19,6 +22,9 @@ type (
 
 	tickMsg  struct{}
 	probeMsg struct{ state SetupState }
+
+	// updateMsg carries the result of the release check.
+	updateMsg struct{ res update.Result }
 
 	// execDoneMsg reports a finished privileged command with its captured stderr.
 	execDoneMsg struct {

@@ -16,7 +16,7 @@
 
 ## Updates
 
-- [ ] Automatic check for new semver releases on GitHub Releases (notification only, no automatic update for now)
+- [x] Automatic check for new semver releases on GitHub Releases (notification only, no automatic update for now)
 
 ## Devices
 
