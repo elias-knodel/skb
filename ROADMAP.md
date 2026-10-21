@@ -2,8 +2,8 @@
 
 ## CI
 
-- [ ] GitHub Actions workflow running `govulncheck` for Go dependency auditing
-- [ ] GitHub Actions workflow enforcing commit message linting (commitlint) and branch name linting
+- [x] GitHub Actions workflow running `govulncheck` for Go dependency auditing
+- [x] GitHub Actions workflow enforcing commit message linting (commitlint) and branch name linting
 - [ ] GitHub Actions workflow building the binary automatically
 
 ## Installation
