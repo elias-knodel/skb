@@ -54,10 +54,20 @@ tasks:
     generates:
       - bin/skb
 
+  dist:
+    desc: Build the release binary and its checksum to ./dist
+    cmds:
+      - rm -rf dist
+      - '{{.EXEC}} env CGO_ENABLED=0 GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version={{.VERSION}}" -o dist/skb-linux-amd64 ./cmd/skb'
+      - cd dist && sha256sum skb-linux-amd64 > SHA256SUMS
+    generates:
+      - dist/skb-linux-amd64
+      - dist/SHA256SUMS
+
   clean:
     desc: Remove build output
     cmds:
-      - rm -rf bin
+      - rm -rf bin dist
 
   cache:destroy:
     desc: Remove the Go cache volume
