@@ -30,11 +30,56 @@ from = "KEY_4"
 to = ["KEY_LEFTSHIFT", "KEY_MINUS"]
 `
 
-func TestNoArgs(t *testing.T) {
+func TestHelp(t *testing.T) {
 	t.Parallel()
 
-	code, _, stderr := run()
-	if code != 2 || !strings.Contains(stderr, "Usage") {
+	for _, arg := range []string{"-h", "--help", "help"} {
+		code, _, stderr := run(arg)
+		if code != 0 {
+			t.Errorf("%s: code = %d", arg, code)
+		}
+
+		for _, want := range []string{"Usage", "-interval", "-socket", "Without a command"} {
+			if !strings.Contains(stderr, want) {
+				t.Errorf("%s: stderr lacks %q", arg, want)
+			}
+		}
+	}
+}
+
+func TestTUISubcommandRemoved(t *testing.T) {
+	t.Parallel()
+
+	code, _, stderr := run("tui")
+	if code != 2 || !strings.Contains(stderr, `unknown command "tui"`) {
+		t.Errorf("code=%d stderr=%q", code, stderr)
+	}
+}
+
+func TestTUIFlagsHelp(t *testing.T) {
+	t.Parallel()
+
+	code, _, stderr := run("--interval", "1s", "--help")
+	if code != 0 || !strings.Contains(stderr, "Usage") {
+		t.Errorf("code=%d stderr=%q", code, stderr)
+	}
+}
+
+func TestTUIBadFlag(t *testing.T) {
+	t.Parallel()
+
+	for _, args := range [][]string{{"--interval", "bogus"}, {"--bogus"}} {
+		if code, _, _ := run(args...); code != 2 {
+			t.Errorf("%v: code = %d", args, code)
+		}
+	}
+}
+
+func TestTUIUnexpectedArgument(t *testing.T) {
+	t.Parallel()
+
+	code, _, stderr := run("--interval", "1s", "extra")
+	if code != 2 || !strings.Contains(stderr, `unexpected argument "extra"`) {
 		t.Errorf("code=%d stderr=%q", code, stderr)
 	}
 }
@@ -92,7 +137,7 @@ func TestCheckConfigDefault(t *testing.T) {
 func TestSubcommandHelp(t *testing.T) {
 	t.Parallel()
 
-	for _, sub := range []string{"check-config", "daemon", "tui"} {
+	for _, sub := range []string{"check-config", "check-update", "daemon"} {
 		if code, _, _ := run(sub, "--help"); code != 0 {
 			t.Errorf("%s --help: code = %d", sub, code)
 		}
@@ -102,11 +147,15 @@ func TestSubcommandHelp(t *testing.T) {
 func TestUsageListsCommands(t *testing.T) {
 	t.Parallel()
 
-	_, _, stderr := run()
-	for _, want := range []string{"install", "uninstall", "tui", "daemon", "check-config"} {
+	_, _, stderr := run("--help")
+	for _, want := range []string{"install", "uninstall", "daemon", "check-config", "check-update"} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("usage lacks %q", want)
 		}
+	}
+
+	if strings.Contains(stderr, "  tui ") {
+		t.Error("usage lists the removed tui command")
 	}
 }
 

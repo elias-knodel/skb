@@ -7,3 +7,8 @@ import _ "embed" // required for go:embed
 //
 //go:embed systemd/skb.service
 var Unit []byte
+
+// Desktop is the freedesktop application entry.
+//
+//go:embed applications/skb.desktop
+var Desktop []byte

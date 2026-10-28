@@ -47,8 +47,8 @@ Go runs exclusively in a container; Go is not required on the host.
 task qa          # build, tidy, lint, tests (-race), govulncheck
 task build       # static binary at ./bin/skb
 task dist        # release binary and SHA256SUMS at ./dist (amd64)
-task install     # sudo ./bin/skb install --admin-uid <uid>: install binary, unit and config
-task uninstall   # remove binary and unit, /etc/skb is kept
+task install     # sudo ./bin/skb install --admin-uid <uid>: install binary, unit, config and desktop entry
+task uninstall   # remove binary, unit and desktop entry, /etc/skb is kept
 ```
 
 ## Releases
@@ -62,9 +62,13 @@ chmod +x skb-linux-amd64
 sudo ./skb-linux-amd64 install --admin-uid "$(id -u)"
 ```
 
+## Updates
+
+When the TUI starts, it asks the GitHub API (`api.github.com/repos/elias-knodel/skb/releases/latest`) at most once per day whether a newer release exists and caches the answer in `$XDG_CACHE_HOME/skb/update.json` (default `~/.cache/skb/update.json`). A newer version is shown in the TUI header with the release URL; nothing is downloaded or installed. Network failures are silent. Development builds (`dev`, `git describe` output with a commit suffix or `-dirty`) skip the check. `skb check-update` queries GitHub immediately, ignoring and refreshing the cache, prints the current and latest version, and exits with 1 if the request fails. Pre-releases are never offered; a running pre-release is notified when the corresponding stable release exists.
+
 ## TUI workflow
 
-`./bin/skb tui` (or `skb tui` after installation):
+`./bin/skb` (or `skb` after installation; TUI flags such as `--interval 1s` can be passed directly):
 
 1. **Setup** (`s`): shows whether the unit is installed and the service is active. `i` installs and starts the service via `pkexec`, `x` additionally disables input-remapper, `u` uninstalls. If the daemon is unreachable and the unit is not installed, the TUI starts directly in setup.
 2. **Add** (`a`): step 1/3 press the side button on the mouse, step 2/3 press the target key or combination on the keyboard, step 3/3 save with `enter` (`t` re-learns the target, `esc` discards).
@@ -73,7 +77,9 @@ sudo ./skb-linux-amd64 install --admin-uid "$(id -u)"
 
 `esc` cancels every learning phase and therefore cannot be learned as a target key. While learning the target, all keyboards that are not grabbed are read without grabbing them; a keyboard grabbed by another program (e.g. input-remapper) cannot be learned. The timeout per learning step is 10 s; the remaining-time display refreshes with the status poll.
 
-**Note on installing from the TUI:** Setup runs `pkexec` on the path of the binary the TUI was started from and copies exactly that binary to `/usr/local/bin/skb`. For maximum security, perform the initial installation with `task install` (sudo) and then start the TUI as `/usr/local/bin/skb tui`.
+After installation, skb appears in the application launcher (search "skb" or "mouse", category System Settings / Hardware) and opens in the default terminal; the entry is `/usr/local/share/applications/skb.desktop`.
+
+**Note on installing from the TUI:** Setup runs `pkexec` on the path of the binary the TUI was started from and copies exactly that binary to `/usr/local/bin/skb`. For maximum security, perform the initial installation with `task install` (sudo) and then start the TUI as `/usr/local/bin/skb`.
 
 ## Configuration and permissions
 
@@ -122,7 +128,7 @@ input-remapper must be disabled for the Darkstar, otherwise grabbing fails with 
 
 ## Status
 
-- `skb tui` shows devices (wired/wireless, status, errors) and mappings.
+- `skb` (without a command) shows devices (wired/wireless, status, errors) and mappings.
 - `journalctl -u skb` or `task logs`. Pressed keys are never logged.
 
 ## Limitations

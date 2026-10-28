@@ -205,17 +205,29 @@ func (r *rig) fire(d time.Duration) tea.Msg {
 func newRig(t *testing.T, st ipc.Status) *rig {
 	t.Helper()
 
+	return newRigWith(t, st, nil)
+}
+
+// newRigWith is newRig with a hook that adjusts the model configuration.
+func newRigWith(t *testing.T, st ipc.Status, adjust func(*tui.Config)) *rig {
+	t.Helper()
+
 	client := &fakeClient{status: st, sourceKey: "KEY_1", target: []string{"KEY_LEFTSHIFT", "KEY_MINUS"}}
 	cmds := &commandRecorder{}
 	r := &rig{t: t, client: client, cmds: cmds}
-	r.m = tui.New(tui.Config{
+	cfg := tui.Config{
 		Client:   client,
 		Prober:   fakeProber{state: tui.SetupState{UnitInstalled: true}},
 		Command:  cmds.factory,
 		UID:      1000,
 		Interval: time.Hour,
 		Tick:     r.tick,
-	})
+	}
+	if adjust != nil {
+		adjust(&cfg)
+	}
+
+	r.m = tui.New(cfg)
 	r.update(tea.WindowSizeMsg{Width: 100, Height: 50})
 
 	return r

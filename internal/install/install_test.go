@@ -124,6 +124,15 @@ func TestFreshInstall(t *testing.T) {
 		t.Fatalf("unit mismatch: %v", err)
 	}
 
+	desktop, err := os.ReadFile(e.path("usr/local/share/applications/skb.desktop"))
+	if err != nil || !bytes.Equal(desktop, deploy.Desktop) {
+		t.Fatalf("desktop entry mismatch: %v", err)
+	}
+
+	if st, _ := os.Stat(e.path("usr/local/share/applications/skb.desktop")); st.Mode().Perm() != 0o644 {
+		t.Errorf("desktop entry mode = %v", st.Mode().Perm())
+	}
+
 	cfg, err := config.Load(e.path("etc/skb/config.toml"))
 	if err != nil || cfg.AdminUID == nil || *cfg.AdminUID != 1000 || len(cfg.Devices) != 2 {
 		t.Fatalf("config: %+v %v", cfg, err)
@@ -143,6 +152,15 @@ func TestInstallKeepsMappingsAddsAdmin(t *testing.T) {
 
 	if err := e.inst.Install(context.Background(), install.Options{AdminUID: 1000}); err != nil {
 		t.Fatal(err)
+	}
+
+	desktop, err := os.ReadFile(e.path("usr/local/share/applications/skb.desktop"))
+	if err != nil || !bytes.Equal(desktop, deploy.Desktop) {
+		t.Fatalf("desktop entry mismatch: %v", err)
+	}
+
+	if st, _ := os.Stat(e.path("usr/local/share/applications/skb.desktop")); st.Mode().Perm() != 0o644 {
+		t.Errorf("desktop entry mode = %v", st.Mode().Perm())
 	}
 
 	cfg, err := config.Load(e.path("etc/skb/config.toml"))
@@ -245,7 +263,7 @@ func TestUninstall(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, p := range []string{"usr/local/bin/skb", "etc/systemd/system/skb.service"} {
+	for _, p := range []string{"usr/local/bin/skb", "etc/systemd/system/skb.service", "usr/local/share/applications/skb.desktop"} {
 		if _, err := os.Stat(e.path(p)); err == nil {
 			t.Errorf("%s still present", p)
 		}
@@ -294,5 +312,62 @@ func TestParseArgs(t *testing.T) {
 
 	if _, err := install.ParseArgs(nil, nil); err == nil {
 		t.Error("missing admin uid accepted")
+	}
+}
+
+func TestUninstallWithoutDesktopEntry(t *testing.T) {
+	t.Parallel()
+
+	e := newEnv(t, 0)
+
+	if err := e.inst.Install(context.Background(), install.Options{AdminUID: 1000}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Remove(e.path("usr/local/share/applications/skb.desktop")); err != nil {
+		t.Fatal(err)
+	}
+
+	e.runner.calls = nil
+
+	if err := e.inst.Uninstall(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{"disable --now skb.service", "daemon-reload"}
+	if got := e.runner.joined(); !slices.Equal(got, want) {
+		t.Errorf("calls = %v", got)
+	}
+}
+
+func TestDesktopEntry(t *testing.T) {
+	t.Parallel()
+
+	lines := strings.Split(strings.TrimSpace(string(deploy.Desktop)), "\n")
+
+	if lines[0] != "[Desktop Entry]" {
+		t.Errorf("first line = %q", lines[0])
+	}
+
+	for _, want := range []string{
+		"Type=Application",
+		"Exec=/usr/local/bin/skb",
+		"TryExec=/usr/local/bin/skb",
+		"Terminal=true",
+		"Icon=input-mouse",
+	} {
+		if !slices.Contains(lines, want) {
+			t.Errorf("missing line %q", want)
+		}
+	}
+
+	for _, l := range lines {
+		if (strings.HasPrefix(l, "Categories=") || strings.HasPrefix(l, "Keywords=")) && !strings.HasSuffix(l, ";") {
+			t.Errorf("list does not end with ';': %q", l)
+		}
+
+		if strings.HasPrefix(l, "Exec=") && strings.Contains(l, " ") {
+			t.Errorf("Exec contains a space: %q", l)
+		}
 	}
 }

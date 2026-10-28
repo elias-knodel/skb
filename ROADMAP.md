@@ -8,15 +8,15 @@
 
 ## Installation
 
-- [ ] Create a `.desktop` entry during installation (at least for KDE Plasma)
+- [x] Create a `.desktop` entry during installation (at least for KDE Plasma)
 
 ## TUI
 
-- [ ] Start the TUI by default when `skb` is run without a subcommand, instead of requiring `skb tui`
+- [x] Start the TUI by default when `skb` is run without a subcommand, instead of requiring `skb tui`
 
 ## Updates
 
-- [ ] Automatic check for new semver releases on GitHub Releases (notification only, no automatic update for now)
+- [x] Automatic check for new semver releases on GitHub Releases (notification only, no automatic update for now)
 
 ## Devices
 

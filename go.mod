@@ -10,6 +10,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.6
 	github.com/holoplot/go-evdev v0.0.0-20260909133534-d873ed210bda
 	github.com/muesli/termenv v0.16.0
+	golang.org/x/mod v0.42.0
 	golang.org/x/sys v0.49.0
 )
 

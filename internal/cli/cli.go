@@ -22,6 +22,7 @@ import (
 	"github.com/elias-knodel/skb/internal/ipc"
 	"github.com/elias-knodel/skb/internal/systemd"
 	"github.com/elias-knodel/skb/internal/tui"
+	"github.com/elias-knodel/skb/internal/update"
 )
 
 // Exit codes.
@@ -33,39 +34,46 @@ const (
 
 const hotplugDebounce = 100 * time.Millisecond
 
-// Run executes the subcommand named by args[0] and returns the process exit code.
+// Run executes the subcommand named by args[0], or the TUI when no command is
+// given, and returns the process exit code.
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer, version string) int {
-	if len(args) == 0 {
-		usage(stderr)
+	var (
+		run  func(context.Context, []string, io.Writer, io.Writer, string) error
+		rest []string
+	)
 
-		return exitUsage
-	}
-
-	var run func(context.Context, []string, io.Writer, io.Writer, string) error
-
-	switch args[0] {
-	case "daemon":
-		run = runDaemon
-	case "tui":
+	switch {
+	case len(args) == 0:
 		run = runTUI
-	case "install":
-		run = runInstall
-	case "uninstall":
-		run = runUninstall
-	case "check-config":
-		run = runCheckConfig
-	case "-h", "--help", "help":
+	case args[0] == "-h" || args[0] == "--help" || args[0] == "help":
 		usage(stderr)
 
 		return exitOK
+	case strings.HasPrefix(args[0], "-"):
+		run, rest = runTUI, args
 	default:
-		_, _ = fmt.Fprintf(stderr, "skb: unknown command %q\n", args[0])
-		usage(stderr)
+		rest = args[1:]
 
-		return exitUsage
+		switch args[0] {
+		case "daemon":
+			run = runDaemon
+		case "install":
+			run = runInstall
+		case "uninstall":
+			run = runUninstall
+		case "check-config":
+			run = runCheckConfig
+		case "check-update":
+			run = runCheckUpdate
+		default:
+			_, _ = fmt.Fprintf(stderr, "skb: unknown command %q\n", args[0])
+			usage(stderr)
+
+			return exitUsage
+		}
 	}
 
-	err := run(ctx, args[1:], stdout, stderr, version)
+	err := run(ctx, rest, stdout, stderr, version)
 
 	switch {
 	case err == nil, errors.Is(err, flag.ErrHelp):
@@ -83,17 +91,37 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, version s
 var errUsage = errors.New("usage")
 
 func usage(w io.Writer) {
-	_, _ = fmt.Fprint(w, `Usage: skb <command> [flags]
+	_, _ = fmt.Fprint(w, `Usage: skb [flags]
+       skb <command> [flags]
 
+Without a command, skb starts the terminal UI.
+
+Flags:
+`)
+
+	fs := flag.NewFlagSet("skb", flag.ContinueOnError)
+	fs.SetOutput(w)
+	tuiFlags(fs)
+	fs.PrintDefaults()
+
+	_, _ = fmt.Fprint(w, `
 Commands:
   daemon        grab the configured devices and remap their keys
-  tui           show the status and manage mappings
-  install       install binary, unit and config (run as root; see tui setup)
-  uninstall     remove binary and unit, keeping the config
+  install       install binary, unit, config and desktop entry (run as root; see TUI setup)
+  uninstall     remove binary, unit and desktop entry, keeping the config
   check-config  validate a configuration file
+  check-update  look up the latest release on GitHub (ignores the daily cache)
 
 Use "skb <command> --help" for the flags of a command.
 `)
+}
+
+// tuiFlags registers the flags of the default TUI mode.
+func tuiFlags(fs *flag.FlagSet) (socket *string, interval *time.Duration) {
+	socket = fs.String("socket", ipc.DefaultSocket, "daemon status socket")
+	interval = fs.Duration("interval", 2*time.Second, "refresh interval")
+
+	return socket, interval
 }
 
 func newFlagSet(name string, stderr io.Writer) *flag.FlagSet {
@@ -143,21 +171,36 @@ func runCheckConfig(_ context.Context, args []string, stdout, stderr io.Writer, 
 	return nil
 }
 
-func runTUI(ctx context.Context, args []string, _, stderr io.Writer, _ string) error {
-	fs := newFlagSet("tui", stderr)
-	socket := fs.String("socket", ipc.DefaultSocket, "daemon status socket")
-	interval := fs.Duration("interval", 2*time.Second, "refresh interval")
+func runTUI(ctx context.Context, args []string, _, stderr io.Writer, version string) error {
+	fs := flag.NewFlagSet("skb", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() { usage(stderr) }
+	socket, interval := tuiFlags(fs)
 
 	if err := parse(fs, args); err != nil {
 		return err
 	}
 
+	if fs.NArg() > 0 {
+		_, _ = fmt.Fprintf(stderr, "skb: unexpected argument %q\n", fs.Arg(0))
+
+		return errUsage
+	}
+
+	var checkUpdate func(context.Context) (update.Result, error)
+
+	if cachePath, err := update.DefaultCachePath(); err == nil {
+		checker := update.Checker{CachePath: cachePath, UserAgent: "skb/" + version}
+		checkUpdate = func(ctx context.Context) (update.Result, error) { return checker.CheckDaily(ctx, version) }
+	}
+
 	model := tui.New(tui.Config{
-		Client:   ipc.Client{Socket: *socket},
-		Prober:   tui.NewProber(*socket),
-		Command:  tui.PkexecCommand,
-		UID:      uint32(os.Getuid()), //nolint:gosec // uid is non-negative
-		Interval: *interval,
+		Client:      ipc.Client{Socket: *socket},
+		Prober:      tui.NewProber(*socket),
+		Command:     tui.PkexecCommand,
+		UID:         uint32(os.Getuid()), //nolint:gosec // uid is non-negative
+		Interval:    *interval,
+		CheckUpdate: checkUpdate,
 	})
 
 	// Query the terminal background once, before bubbletea owns stdin.
@@ -268,4 +311,26 @@ func runUninstall(ctx context.Context, args []string, stdout, stderr io.Writer, 
 	}
 
 	return newInstaller(stdout).Uninstall(ctx)
+}
+
+func runCheckUpdate(ctx context.Context, args []string, stdout, stderr io.Writer, version string) error {
+	fs := newFlagSet("check-update", stderr)
+
+	if err := parse(fs, args); err != nil {
+		return err
+	}
+
+	checker := update.Checker{UserAgent: "skb/" + version}
+	if p, err := update.DefaultCachePath(); err == nil {
+		checker.CachePath = p
+	}
+
+	res, err := checker.Check(ctx, version)
+	if err != nil {
+		return err
+	}
+
+	update.Report(stdout, res)
+
+	return nil
 }

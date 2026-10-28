@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/elias-knodel/skb/internal/ipc"
+	"github.com/elias-knodel/skb/internal/update"
 )
 
 const (
@@ -36,6 +37,8 @@ const (
 	// still in flight from the learn step cannot trigger an action.
 	inputGuard    = 400 * time.Millisecond
 	flashDuration = 3 * time.Second
+	// updateTimeout bounds the release check.
+	updateTimeout = 10 * time.Second
 	// spinFPS is the frame interval of spinner.MiniDot.
 	spinFPS = time.Second / 12
 	// refreshMinFrames keeps the refresh spinner visible for at least this many frames.
@@ -87,6 +90,8 @@ type Config struct {
 	Tick func(d time.Duration, f func(time.Time) tea.Msg) tea.Cmd
 	// Now returns the current time for the uptime display; time.Now when nil.
 	Now func() time.Time
+	// CheckUpdate looks up a newer release; nil disables the check.
+	CheckUpdate func(ctx context.Context) (update.Result, error)
 }
 
 type viewID int
@@ -113,6 +118,7 @@ type Model struct {
 	loaded    bool
 	cursor    int
 	hint      string
+	update    update.Result
 
 	// fetchSeq numbers status fetches; results older than appliedSeq are dropped.
 	fetchSeq, appliedSeq int
@@ -200,7 +206,27 @@ func (m Model) layout() Model {
 func (m Model) Init() tea.Cmd {
 	_, cmd := m.fetch(true)
 
-	return cmd
+	return tea.Batch(cmd, m.updateCmd())
+}
+
+// updateCmd runs the release check; failures are silent.
+func (m Model) updateCmd() tea.Cmd {
+	check := m.cfg.CheckUpdate
+	if check == nil {
+		return nil
+	}
+
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), updateTimeout)
+		defer cancel()
+
+		res, err := check(ctx)
+		if err != nil {
+			return nil
+		}
+
+		return updateMsg{res: res}
+	}
 }
 
 // fetch starts a status fetch. Only poll fetches continue the poll chain.
@@ -334,6 +360,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		return m, m.pollCmd(msg.poll)
+	case updateMsg:
+		if msg.res.Available {
+			m.update = msg.res
+		}
+
+		return m, nil
 	case tickMsg:
 		return m.fetch(true)
 	case refreshTickMsg:
